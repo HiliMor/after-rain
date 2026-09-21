@@ -319,41 +319,35 @@ h1 em::after {
   background: #dae5d3;
   border-radius: 50%;
 }
+/* No ring: a drawn outline around a light in a forest reads as interface, not as a light.
+   The glow alone carries the position, and swells when there is something to activate. */
 .cursor {
   position: fixed;
   pointer-events: none;
-  width: 32px;
-  height: 32px;
-  margin: -16px;
-  border: 1px solid #dce1b154;
-  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px;
   display: none;
   z-index: 2;
+  background: radial-gradient(
+    circle closest-side,
+    #fff3cfcc 0%,
+    #f3e5b47a 22%,
+    #e8cf8c33 46%,
+    #e8cf8c00 100%
+  );
   transition:
     width 0.25s,
     height 0.25s,
     margin 0.25s,
-    border-color 0.25s;
-}
-.cursor:after {
-  content: '';
-  width: 3px;
-  height: 3px;
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  border-radius: 50%;
-  background: #f3e5b4;
+    opacity 0.25s;
+  opacity: 0.85;
 }
 .cursor.interactive {
-  width: 46px;
-  height: 46px;
-  margin: -23px;
-  border-color: #efdfa2;
-}
-.cursor.interactive:after {
-  top: 21px;
-  left: 21px;
+  width: 58px;
+  height: 58px;
+  margin: -29px;
+  opacity: 1;
 }
 .toast {
   position: absolute;

@@ -1166,9 +1166,31 @@ export class Forest {
       side: THREE.DoubleSide,
     });
     water.name = 'pool-water';
-    const d = distance(positionWorld.xz, this.rippleCenter),
+    // A wavefront measured as plain radius is a perfect circle, which is the one thing real
+    // water never makes. Warping the radius by a smooth function of direction bends the
+    // front without breaking it: the offset is a unit vector, so its components sweep like
+    // cos and sin as the angle goes round, and combining them gives several harmonics.
+    const bentRadius = (centre: typeof this.rippleCenter, phase: number) => {
+      const offset = positionWorld.xz.sub(centre),
+        radius = offset.length(),
+        heading = offset.div(radius.max(0.0001));
+      return radius.mul(
+        float(1)
+          .add(sin(heading.x.mul(5.7).add(heading.y.mul(3.1)).add(phase)).mul(0.052))
+          .add(
+            sin(
+              heading.y
+                .mul(6.9)
+                .sub(heading.x.mul(2.3))
+                .add(phase * 1.7),
+            ).mul(0.038),
+          )
+          .add(sin(heading.x.mul(11.3).sub(heading.y.mul(9.1))).mul(0.018)),
+      );
+    };
+    const d = bentRadius(this.rippleCenter, 0.6),
       age = this.time.sub(this.rippleTime),
-      touchDistance = distance(positionWorld.xz, this.touchCenter),
+      touchDistance = bentRadius(this.touchCenter, 2.3),
       touchAge = this.time.sub(this.touchTime);
     const ripple = sin(d.mul(22).sub(age.mul(9)))
       .mul(exp(d.sub(age.mul(0.9)).pow(2).mul(-3)))
@@ -1282,6 +1304,33 @@ export class Forest {
     water.opacityNode = smoothstep(0.003, 0.042, depth)
       .mul(smoothstep(1.21, 1.02, shoreRamp))
       .mul(fresnel.mul(0.2).add(0.8));
+    // Travelling rings, built once and shared. The same argument as the wavefront above:
+    // a mathematically round ring is the tell, so each carries its own irregular outline.
+    const bentRing = (seed: number) => {
+      // Wide enough to carry a crest rather than a stroke: the band fades to nothing at
+      // both edges through vertex colour, so it reads as a raised wave, not a drawn line.
+      const ring = new THREE.RingGeometry(0.93, 1.02, 96, 3);
+      const points = ring.attributes.position,
+        fade = new Float32Array(points.count * 3);
+      for (let i = 0; i < points.count; i++) {
+        const px = points.getX(i),
+          py = points.getY(i),
+          a = Math.atan2(py, px),
+          r = Math.hypot(px, py),
+          across = (r - 0.93) / 0.09,
+          profile = Math.sin(Math.min(1, Math.max(0, across)) * Math.PI) ** 0.8,
+          warp =
+            1 +
+            Math.sin(a * 3 + seed) * 0.055 +
+            Math.sin(a * 5 - seed * 1.4) * 0.032 +
+            Math.sin(a * 9 + seed * 0.7) * 0.014;
+        points.setXY(i, px * warp, py * warp);
+        fade[i * 3] = fade[i * 3 + 1] = fade[i * 3 + 2] = profile;
+      }
+      ring.setAttribute('color', new THREE.BufferAttribute(fade, 3));
+      ring.rotateX(-Math.PI / 2);
+      return ring;
+    };
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(geo, water);
@@ -1291,6 +1340,7 @@ export class Forest {
     for (let i = 0; i < 6; i++) {
       const mat = new THREE.MeshBasicNodeMaterial({
         color: '#b4dfe1',
+        vertexColors: true,
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -1299,8 +1349,7 @@ export class Forest {
       mat.opacityNode = float(1)
         .sub(smoothstep(0.95, 1, positionWorld.xz.sub(vec2(0, 1.1)).div(vec2(2.38, 1.57)).length()))
         .mul(materialOpacity);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.98, 1, 96), mat);
-      ring.rotation.x = -Math.PI / 2;
+      const ring = new THREE.Mesh(bentRing(i * 1.9 + 0.4), mat);
       ring.position.set(this.dropPosition.x, -0.017 + i * 0.001, this.dropPosition.z);
       ring.visible = false;
       this.scene.add(ring);
@@ -1309,6 +1358,7 @@ export class Forest {
     for (let i = 0; i < 4; i++) {
       const mat = new THREE.MeshBasicNodeMaterial({
         color: '#8dd6d0',
+        vertexColors: true,
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -1317,8 +1367,7 @@ export class Forest {
       mat.opacityNode = float(1)
         .sub(smoothstep(0.95, 1, positionWorld.xz.sub(vec2(0, 1.1)).div(vec2(2.38, 1.57)).length()))
         .mul(materialOpacity);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.98, 1, 96), mat);
-      ring.rotation.x = -Math.PI / 2;
+      const ring = new THREE.Mesh(bentRing(i * 2.3 + 3.1), mat);
       ring.position.set(this.touchCenter.value.x, -0.016 + i * 0.001, this.touchCenter.value.y);
       ring.visible = false;
       this.scene.add(ring);
