@@ -21,6 +21,7 @@ import {
   materialOpacity,
   add,
   nodeObject,
+  texture,
   uv,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -346,9 +347,9 @@ export class Forest {
       bumpScale: 0.006,
       metalness: 0,
       specularIntensity: 0.17,
-      // No clearcoat here on purpose. The carpet is 28,000 instanced blades covering most
-      // of the frame, and a second specular lobe across them cost more than half the frame
-      // rate - 29 fps against 60 - for a sparkle that was aliasing anyway.
+      // No film on the carpet: a sharp one on instanced blades this small sparkles into
+      // aliasing, and a soft one is invisible at their scale. The dew beads carry the wet
+      // read down here instead.
       clearcoat: 0,
       // Every instance below is given its own colour, but a colorNode here would replace
       // the diffuse chain and quietly discard all of it, leaving one flat green carpet.
@@ -415,6 +416,47 @@ export class Forest {
       shoots.setColorAt(i, new THREE.Color().setHSL(range(0.18, 0.28), 0.4, range(0.2, 0.44)));
     }
     this.scene.add(shoots);
+    this.buildDew();
+  }
+
+  /**
+   * Rain left on the carpet. These are the scene's reward for moving the light: each bead
+   * is mostly specular, so the whole floor lights up in sequence as the light travels over
+   * it. Its own material, not the drop's - that one is fully transmissive, which would put
+   * a thousand instances through the transmission pass for beads a few pixels across.
+   */
+  private buildDew() {
+    // A bead of water at night is mostly dark, carrying one hard glint. Lit up as a pale
+    // body it reads as polystyrene, so the colour stays dim and the clearcoat does the work.
+    const mat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#37525c',
+      roughness: 0.04,
+      metalness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0.03,
+      specularIntensity: 1,
+    });
+    const near = distance(positionWorld, this.lightPosition);
+    mat.emissiveNode = color('#bfe2ea').mul(exp(near.mul(-2.2)).mul(0.34).add(0.012));
+    const count = this.mobile ? 420 : 1100;
+    const dew = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat, count);
+    for (let i = 0; i < count; i++) {
+      let x: number, z: number;
+      do {
+        x = range(-6.5, 6.5);
+        z = range(-4.6, 4.4);
+      } while (!outsidePool(x, z, 1.05));
+      // Beads gather where the moss is thickest, which is the same low-frequency pattern
+      // the carpet itself is scattered by.
+      const thickness = 0.5 + 0.5 * Math.sin(x * 3.2) * Math.sin(z * 3.7);
+      const s = range(0.0055, 0.0155) * (0.55 + thickness * 0.75);
+      this.dummy.position.set(x, ground(x, z) + range(0.012, 0.115), z);
+      this.dummy.scale.set(s, s * range(0.72, 0.95), s);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.updateMatrix();
+      dew.setMatrixAt(i, this.dummy.matrix);
+    }
+    this.scene.add(dew);
   }
 
   /**
@@ -456,7 +498,7 @@ export class Forest {
       // Wet foliage is a rough leaf under a thin film of water, so the gloss belongs in the
       // clearcoat rather than in the substrate. The film is broken up by the leaf's own
       // relief, which keeps it a sheen instead of one blown mirror highlight.
-      clearcoatRoughness: 0.32,
+      clearcoatRoughness: 0.44,
       clearcoatRoughnessMap: this.detail.leafRoughness,
       side: THREE.DoubleSide,
     });
@@ -465,8 +507,8 @@ export class Forest {
       .mul(0.5)
       .add(0.5)
       .pow(1.5)
-      .mul(0.58)
-      .add(0.04);
+      .mul(0.36)
+      .add(0.03);
     fernMat.emissiveNode = this.foliageGlow(1.6);
     const fernGeo = fernGeometry();
     const clusters = [
@@ -519,7 +561,7 @@ export class Forest {
       roughnessMap: this.detail.leafRoughness,
       roughness: 0.88,
       specularIntensity: 0.3,
-      clearcoatRoughness: 0.3,
+      clearcoatRoughness: 0.42,
       clearcoatRoughnessMap: this.detail.leafRoughness,
       vertexColors: true,
       side: THREE.DoubleSide,
@@ -531,8 +573,8 @@ export class Forest {
       .mul(0.5)
       .add(0.5)
       .pow(1.5)
-      .mul(0.66)
-      .add(0.05);
+      .mul(0.4)
+      .add(0.04);
     const stemMat = new THREE.MeshStandardNodeMaterial({ color: '#4d6b3b', roughness: 0.54 });
     leafMat.positionNode = positionLocal.add(
       vec3(
@@ -1144,16 +1186,42 @@ export class Forest {
     )
       .mul(0.004)
       .mul(this.motion);
-    const normalX = ripple.add(touchRipple).add(still).add(swell).add(crossWave),
+    // A fine, faster band on top. The surface was smooth enough that moonlight landed on it
+    // as one even sheet, which is what made the pool read as dusty glass when nothing was
+    // lighting it from nearby; glitter needs slope variation to break the reflection up.
+    // Axis-aligned products at related frequencies moire into visible stripes across the
+    // surface, so these run at angles to each other on deliberately unrelated frequencies.
+    const chop = sin(
+      positionWorld.x.mul(13.7).add(positionWorld.z.mul(5.3)).add(this.time.mul(1.05)),
+    )
+      .mul(cos(positionWorld.x.mul(-6.1).add(positionWorld.z.mul(17.9)).sub(this.time.mul(0.83))))
+      .mul(0.62)
+      .add(
+        sin(positionWorld.x.mul(29.3).sub(positionWorld.z.mul(24.1)).add(this.time.mul(1.47))).mul(
+          0.38,
+        ),
+      )
+      .mul(0.017)
+      .mul(this.motion);
+    const normalX = ripple.add(touchRipple).add(still).add(swell).add(crossWave).add(chop),
       normalZ = ripple
         .mul(0.72)
         .add(touchRipple.mul(0.78))
         .add(still.mul(0.8))
         .add(swell.mul(0.75))
-        .sub(crossWave);
-    water.normalNode = vec3(normalX, float(1), normalZ)
-      .normalize()
-      .transformDirection(this.camera.matrixWorldInverse);
+        .sub(crossWave)
+        .add(chop.mul(0.84));
+    const surfaceNormal = vec3(normalX, float(1), normalZ).normalize();
+    water.normalNode = surfaceNormal.transformDirection(this.camera.matrixWorldInverse);
+    // Moonlight glittering off the chop. Computed here rather than left to the lighting
+    // pipeline so the pool keeps its own structure with no light anywhere near it.
+    const toEye = cameraPosition.sub(positionWorld).normalize(),
+      bounced = surfaceNormal.mul(surfaceNormal.dot(toEye).mul(2)).sub(toEye),
+      moonAim = vec3(-0.33, 0.77, -0.55),
+      aligned = bounced.dot(moonAim).saturate(),
+      // A broad sheen rather than point sparkle: from these angles the reflected ray only
+      // ever comes within about 0.78 of the moon, and a tight exponent on that is zero.
+      glitter = aligned.pow(10).mul(0.22).add(aligned.pow(36).mul(1.1));
     // Reconstruct the basin floor from the same profile the terrain mesh uses, so the
     // water knows how deep it is at every point instead of being a single flat tone.
     const bankRise = float(0.2)
@@ -1174,14 +1242,25 @@ export class Forest {
     )
       .mul(0.5)
       .add(0.5);
+    // The bed read through the water. Without it the body was a smooth tone ramp, which is
+    // what left the pool looking like dusty glass whenever nothing lit it from nearby: a
+    // shallow pool is mostly read by the litter and silt visible through it.
+    const bed = texture(
+      this.naturalSurfaces.maps.groundColor,
+      positionWorld.xz.mul(0.42).add(vec2(0.31, 0.12)),
+    ).rgb.mul(color('#7d9a86'));
     const deepTone = mix(color('#06202a'), color('#2d5d5b'), shimmer.mul(0.16).add(0.14)),
       shallowTone = mix(color('#26362c'), color('#47624b'), shimmer.mul(0.2).add(0.22)),
-      waterTone = mix(shallowTone, deepTone, depthMix);
+      // Light reaching the bed and coming back falls away quickly with depth.
+      bedThrough = exp(depth.mul(-11)).mul(0.85),
+      waterTone = mix(shallowTone, deepTone, depthMix).add(bed.mul(bedThrough));
     const lightThroughWater = exp(distance(positionWorld.xz, this.lightPosition.xz).mul(-1.35)).mul(
         0.26,
       ),
       litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater);
-    water.emissiveNode = color('#4f978a').mul(lightThroughWater.mul(depthMix).mul(0.2));
+    water.emissiveNode = color('#4f978a')
+      .mul(lightThroughWater.mul(depthMix).mul(0.2))
+      .add(color('#cfe6f2').mul(glitter.mul(depthMix.mul(0.55).add(0.45))));
     if (!this.mobile) {
       const reflection = reflector({ resolutionScale: 1, bounces: false });
       reflection.target.rotation.x = -Math.PI / 2;
