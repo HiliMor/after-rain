@@ -643,6 +643,30 @@ dialog strong {
     display: none !important;
   }
 }
+/* The headline was sized from viewport width alone, so on a short window it kept its full
+   height and ran down into the footer, colliding with the location caption. Vertical space
+   needs its own rule. Placed after the width queries so it wins where both apply. */
+@media (max-height: 760px) {
+  .intro {
+    /* A bare percentage walks up into the header once the window is short enough, so the
+       header's own height is the floor. */
+    top: max(86px, 13%);
+  }
+  h1 {
+    font-size: clamp(58px, 11.5vh, 112px);
+    letter-spacing: -3px;
+    margin: 18px 0 16px;
+  }
+  .intro p {
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .intro-rule,
+  .intro-caption {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *:before,

@@ -77,7 +77,8 @@ Water gathers in the cupped underside of the hero leaf. The leaf sways, the conc
 - Pointer parallax swings the desktop camera around the clearing far enough to read, with the look target following a fraction of the swing so the composition stays anchored while the foreground travels against the distance. Touch viewports keep a fixed frame, since a drag there is already carrying the light.
 - The camera follows its framing directly rather than smoothing an already-smoothed value at half rate, and the parallax offset settles on its own slower curve so a twitchy pointer cannot shake the frame. The push in to the snail stays deliberately slower than ordinary movement, and parallax is kept separate from the pointer used for picking so hit testing stays exact.
 - The carried light has no drawn ring around it, only a glow that swells over anything activatable: an outline around a light in a forest reads as interface rather than as light.
-- Controls have accessible names, focus indicators, keyboard equivalents, and a native modal dialog. The decorative canvas is accompanied by a scene description. Renderer initialization failure displays a readable recovery panel.
+- Controls have accessible names, focus indicators, keyboard equivalents, and a native modal dialog. Decorative numerals are hidden from assistive technology so each button is announced by its label alone.
+- Interface blocks are checked for collisions across five window shapes in the browser tests, after the headline was found running into the footer on short windows. The decorative canvas is accompanied by a scene description. Renderer initialization failure displays a readable recovery panel.
 
 ### Source map
 

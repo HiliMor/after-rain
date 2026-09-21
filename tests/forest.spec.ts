@@ -210,6 +210,43 @@ test('a click that does not drag still reaches the scene', async ({ page }) => {
   expect(Math.abs((await state(page)).orbit[0])).toBeLessThan(0.02);
 });
 
+test('interface blocks do not collide on short or awkward windows', async ({ page }) => {
+  // The headline was sized from viewport width alone, so a short window let it run down
+  // into the footer and overlap the location caption.
+  for (const [width, height] of [
+    [1440, 620],
+    [1024, 560],
+    [844, 390],
+    [1280, 700],
+    [320, 640],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await ready(page);
+    const collisions = await page.evaluate(() => {
+      const pick = (selector: string) => {
+        const box = document.querySelector(selector)?.getBoundingClientRect();
+        return box && box.width > 0 && box.height > 0 ? box : null;
+      };
+      const boxes: Record<string, DOMRect | null> = {
+        intro: pick('.intro'),
+        location: pick('.location'),
+        interactions: pick('.interactions'),
+        hint: pick('.gesture-hint'),
+        topbar: pick('.topbar'),
+      };
+      const overlaps = (a: DOMRect | null, b: DOMRect | null) =>
+        !!a && !!b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const names = Object.keys(boxes),
+        found: string[] = [];
+      for (let i = 0; i < names.length; i++)
+        for (let j = i + 1; j < names.length; j++)
+          if (overlaps(boxes[names[i]], boxes[names[j]])) found.push(`${names[i]}/${names[j]}`);
+      return found;
+    });
+    expect(collisions, `${width}x${height}`).toEqual([]);
+  }
+});
+
 test('a wheel notch means the same in pixel and line delta modes', async ({ page }) => {
   await ready(page);
   await page.mouse.move(760, 460);

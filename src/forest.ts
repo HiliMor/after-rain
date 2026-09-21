@@ -18,7 +18,6 @@ import {
   screenUV,
   cameraPosition,
   normalWorld,
-  materialOpacity,
   add,
   nodeObject,
   texture,
