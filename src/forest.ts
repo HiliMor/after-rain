@@ -161,8 +161,10 @@ export class Forest {
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight, false);
     this.renderer.domElement.setAttribute('aria-hidden', 'true');
     this.container.append(this.renderer.domElement);
-    this.scene.background = new THREE.Color('#0d2330');
-    this.scene.fog = new THREE.FogExp2('#0d2330', 0.057);
+    // A flat fill made the backdrop read as a wall. A shallow vertical gradient, with the
+    // fog matched to the band the trunks actually stand in, gives the distance some air.
+    this.scene.backgroundNode = mix(color('#12293a'), color('#081824'), screenUV.y.pow(0.75));
+    this.scene.fog = new THREE.FogExp2('#0e2433', 0.057);
     this.scene.environment = this.textures.env;
     this.scene.environmentIntensity = 0.65;
     this.motion.value = this.reducedMotion.matches ? 0 : 1;
@@ -301,17 +303,29 @@ export class Forest {
       normalMap: this.naturalSurfaces.maps.barkNormal,
       roughness: 0.9,
     });
-    this.trees = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.3, 0.65, 18, 9, 4),
-      treeMat,
-      55,
-    );
-    for (let i = 0; i < 55; i++) {
-      this.dummy.position.set(range(-20, 20), 7, range(-28, -7));
-      this.dummy.scale.set(range(0.3, 1.5), range(0.7, 1.3), range(0.3, 1.4));
-      this.dummy.rotation.set(range(-0.14, 0.14), rand() * 6, range(-0.12, 0.12));
+    // Identical trunks at one depth merged into a striped curtain. Per-trunk value, a
+    // darkened base and a deeper spread let the fog separate them into layers.
+    treeMat.vertexColors = true;
+    const trunkGeo = new THREE.CylinderGeometry(0.3, 0.65, 18, 11, 6);
+    const trunkPos = trunkGeo.attributes.position,
+      trunkShade = new Float32Array(trunkPos.count * 3);
+    for (let i = 0; i < trunkPos.count; i++) {
+      const height = (trunkPos.getY(i) + 9) / 18,
+        base = 0.32 + 0.68 * Math.min(1, Math.max(0, (height - 0.02) * 2.6));
+      trunkShade[i * 3] = trunkShade[i * 3 + 1] = trunkShade[i * 3 + 2] = base;
+    }
+    trunkGeo.setAttribute('color', new THREE.BufferAttribute(trunkShade, 3));
+    this.trees = new THREE.InstancedMesh(trunkGeo, treeMat, 68);
+    for (let i = 0; i < 68; i++) {
+      this.dummy.position.set(range(-22, 22), 7, range(-30, -6));
+      this.dummy.scale.set(range(0.28, 1.6), range(0.65, 1.35), range(0.28, 1.5));
+      this.dummy.rotation.set(range(-0.2, 0.2), rand() * 6, range(-0.18, 0.18));
       this.dummy.updateMatrix();
       this.trees.setMatrixAt(i, this.dummy.matrix);
+      this.trees.setColorAt(
+        i,
+        new THREE.Color().setHSL(range(0.46, 0.55), range(0.1, 0.3), range(0.2, 0.62)),
+      );
     }
     this.scene.add(this.trees);
   }
