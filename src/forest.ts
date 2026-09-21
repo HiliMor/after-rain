@@ -106,7 +106,9 @@ export class Forest {
   private firefly = new THREE.Group();
   private pointerLight = new THREE.PointLight(0xffdc8d, 3, 5.5, 2);
   private guideLight = new THREE.PointLight(0xffce72, 1.3, 4, 2);
-  private fireflyWing!: THREE.Mesh;
+  private fireflyWing!: THREE.Group;
+  private fireflyGlow!: THREE.Sprite;
+  private fireflyBulb!: THREE.Mesh;
   private stars!: THREE.InstancedMesh;
   private trees!: THREE.InstancedMesh;
   private vegetation: THREE.Object3D[] = [];
@@ -690,8 +692,8 @@ export class Forest {
       bumpMap: this.detail.leafHeight,
       bumpScale: 0.008,
       specularIntensity: 0.14,
-      clearcoat: 0.34,
-      clearcoatRoughness: 0.34,
+      clearcoat: 0.17,
+      clearcoatRoughness: 0.5,
       clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
@@ -1384,8 +1386,8 @@ export class Forest {
       bumpMap: this.detail.skinHeight,
       bumpScale: 0.02,
       specularIntensity: 0.16,
-      clearcoat: 0.36,
-      clearcoatRoughness: 0.32,
+      clearcoat: 0.18,
+      clearcoatRoughness: 0.48,
       clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
@@ -1397,8 +1399,8 @@ export class Forest {
       bumpMap: this.detail.skinHeight,
       bumpScale: 0.022,
       specularIntensity: 0.12,
-      clearcoat: 0.32,
-      clearcoatRoughness: 0.33,
+      clearcoat: 0.16,
+      clearcoatRoughness: 0.5,
       clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
@@ -1423,11 +1425,11 @@ export class Forest {
       color: '#a66f3f',
       roughness: 0.98,
       specularIntensity: 0.16,
-      // A shell is naturally glossy and this one has just been rained on, yet it was the
-      // only matte thing left in a wet scene. Same treatment as the foliage: the film goes
-      // in the clearcoat, broken up by the shell's own roughness so it is not a mirror.
-      clearcoat: 0.62,
-      clearcoatRoughness: 0.16,
+      // A damp shell, not a glazed one. Set high and tight this threw hard white streaks
+      // and read as lacquered ceramic - a shell in a dark wood carries a soft sheen along
+      // its whorl, nothing more, so the film is weak and its highlight deliberately broad.
+      clearcoat: 0.2,
+      clearcoatRoughness: 0.46,
       clearcoatRoughnessMap: this.detail.shellRoughness,
       side: THREE.DoubleSide,
     });
@@ -1607,18 +1609,28 @@ export class Forest {
     );
     glow.scale.setScalar(0.68);
     this.firefly.add(glow);
-    this.fireflyWing = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 10, 6),
-      new THREE.MeshPhysicalNodeMaterial({
-        color: '#cadce0',
-        transparent: true,
-        opacity: 0.26,
-        roughness: 0.2,
-        side: THREE.DoubleSide,
-      }),
-    );
-    this.fireflyWing.scale.set(0.1, 0.004, 0.036);
+    // This was one rigid plate four times the body's length, run through the middle of the
+    // insect on a glossy material, so it caught a specular and read as a white rod. A beating
+    // wing at this scale is a smudge of light, not a surface: two of them, each shorter than
+    // the body, matte enough to catch no highlight, and faint enough to blur as they go.
+    this.fireflyWing = new THREE.Group();
+    const wingMat = new THREE.MeshBasicNodeMaterial({
+      color: '#c3d6dd',
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 5), wingMat);
+      wing.scale.set(0.026, 0.0025, 0.014);
+      wing.position.set(side * 0.024, 0.006, -0.004);
+      wing.rotation.y = side * 0.5;
+      this.fireflyWing.add(wing);
+    }
     this.firefly.add(this.fireflyWing);
+    this.fireflyGlow = glow;
+    this.fireflyBulb = bulb;
     this.scene.add(this.firefly);
     const pointerGlow = new THREE.Sprite(
       new THREE.SpriteNodeMaterial({
@@ -2053,8 +2065,16 @@ export class Forest {
       0.6 + Math.sin(t * 0.24 * motion) * 0.5,
     );
     this.guideLight.position.copy(this.firefly.position);
-    this.guideLight.intensity = 1.1 + Math.sin(t * 2 * motion) * 0.18;
-    this.fireflyWing.rotation.z = Math.sin(t * 67 * motion) * 0.5;
+    // Fireflies pulse rather than shine steadily. Shaping the sine leaves it dim for most of
+    // the cycle and swells briefly, which is the rhythm that reads as a living signal.
+    const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 1.15 * motion), 2.2);
+    this.guideLight.intensity = 0.62 + pulse * 1.25;
+    this.fireflyBulb.scale.setScalar(0.72 + pulse * 0.5);
+    this.fireflyGlow.scale.setScalar(0.42 + pulse * 0.46);
+    // The two wings beat against each other rather than sweeping as one plate.
+    const beat = Math.sin(t * 67 * motion) * 0.7;
+    this.fireflyWing.children[0].rotation.z = beat;
+    this.fireflyWing.children[1].rotation.z = -beat;
     this.vegetation.forEach((plant, i) => {
       plant.rotation.z = Math.sin(t * 0.42 + i) * 0.016 * motion;
       plant.rotation.x = Math.sin(t * 0.27 + i * 0.7) * 0.006 * motion;
@@ -2322,6 +2342,10 @@ export class Forest {
         .toArray(),
       leafScreen: this.heroLeaf
         .localToWorld(new THREE.Vector3(0, 0.3, 1.6))
+        .project(this.camera)
+        .toArray(),
+      fireflyScreen: this.firefly
+        .getWorldPosition(new THREE.Vector3())
         .project(this.camera)
         .toArray(),
       snailScreen: this.snailHit
