@@ -39,6 +39,8 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 - A frond behind the hero droplet gives its refraction visible detail to enlarge/distort.
 - The snail now uses a less obstructed close-up and a properly tapered tail.
 
+- Movement pass (2026-09-21): wheel input was normalised across delta modes after finding that a line-reporting browser moved the zoom about 33x less than a pixel-reporting one for the same physical notch; `+` / `-` were added because looking closer had no keyboard path; and the camera follow was rebuilt, having previously smoothed an already-smoothed value at half rate for roughly three quarters of a second of lag. Measured settling for three notches: 0.35 immediately, 0.45 by ~600 ms, with pixel, line and keyboard input landing within 0.01 of each other. Two tests were added (**6 passed**); the existing desktop test caught an over-tight per-event clamp during this pass, which was corrected.
+
 ## Remaining release checks
 
 Actual Safari/iOS and Android hardware, long-duration resource/thermal behavior, and a listening pass for synthesized sound have not been verified. No claim of a full accessibility audit or a universal frame-rate target is made. Further visual realism would benefit from finer moss, a more anatomical snail and contact shadows; mushroom silhouettes now vary by maturity, but the caps are still lathe surfaces rather than scanned fungi. See README for rendering and simulation limits.
