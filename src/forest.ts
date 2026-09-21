@@ -53,11 +53,6 @@ export type ForestEvents = {
   onDiscovery: () => void;
   onError: (error: unknown) => void;
 };
-type Ripple = {
-  mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicNodeMaterial>;
-  born: number;
-  delay: number;
-};
 const UP = new THREE.Vector3(0, 1, 0);
 // Basin profile shared by the terrain mesh, the water sheet and the shoreline planting.
 const POOL_RADIUS_X = 2.35,
@@ -98,8 +93,6 @@ export class Forest {
   private dropPosition = new THREE.Vector3();
   private dropStarted = -100;
   private impactDone = true;
-  private rippleRings: Ripple[] = [];
-  private touchRings: Ripple[] = [];
   private splash: THREE.Mesh[] = [];
   private waterMesh!: THREE.Mesh;
   private floatingLeaf!: THREE.Group;
@@ -1192,14 +1185,18 @@ export class Forest {
       age = this.time.sub(this.rippleTime),
       touchDistance = bentRadius(this.touchCenter, 2.3),
       touchAge = this.time.sub(this.touchTime);
-    const ripple = sin(d.mul(22).sub(age.mul(9)))
-      .mul(exp(d.sub(age.mul(0.9)).pow(2).mul(-3)))
-      .mul(exp(age.mul(-0.6)))
-      .mul(0.07);
-    const touchRipple = sin(touchDistance.mul(28).sub(touchAge.mul(10)))
-      .mul(exp(touchDistance.sub(touchAge.mul(0.95)).pow(2).mul(-5)))
-      .mul(exp(touchAge.mul(-0.8)))
-      .mul(0.055);
+    // These used to be backed up by drawn rings laid over the water, which expanded at a
+    // different speed from the wavefront here and read as strokes rather than as water.
+    // The rings are gone, so the surface has to carry the whole event: a wider packet with
+    // several crests, deep enough that the moon sheen rides over it as it travels.
+    const ripple = sin(d.mul(20).sub(age.mul(8.5)))
+      .mul(exp(d.sub(age.mul(0.9)).pow(2).mul(-2.1)))
+      .mul(exp(age.mul(-0.5)))
+      .mul(0.2);
+    const touchRipple = sin(touchDistance.mul(24).sub(touchAge.mul(9.2)))
+      .mul(exp(touchDistance.sub(touchAge.mul(0.95)).pow(2).mul(-2.8)))
+      .mul(exp(touchAge.mul(-0.62)))
+      .mul(0.16);
     const still = sin(positionWorld.x.mul(7).add(this.time.mul(0.4)))
       .mul(cos(positionWorld.z.mul(9).add(this.time.mul(0.5))))
       .mul(0.005)
@@ -1272,19 +1269,30 @@ export class Forest {
     // The bed read through the water. Without it the body was a smooth tone ramp, which is
     // what left the pool looking like dusty glass whenever nothing lit it from nearby: a
     // shallow pool is mostly read by the litter and silt visible through it.
+    // What you actually read a ripple by in a shallow pool is the bed bending underneath it
+    // and the reflection breaking up, not the shading of the surface itself.
+    const disturbance = ripple.add(touchRipple);
     const bed = texture(
       this.naturalSurfaces.maps.groundColor,
-      positionWorld.xz.mul(0.42).add(vec2(0.31, 0.12)),
+      positionWorld.xz
+        .mul(0.42)
+        .add(vec2(0.31, 0.12))
+        .add(vec2(disturbance.mul(0.55), disturbance.mul(0.42))),
     ).rgb.mul(color('#7d9a86'));
     const deepTone = mix(color('#06202a'), color('#2d5d5b'), shimmer.mul(0.16).add(0.14)),
       shallowTone = mix(color('#26362c'), color('#47624b'), shimmer.mul(0.2).add(0.22)),
       // Light reaching the bed and coming back falls away quickly with depth.
       bedThrough = exp(depth.mul(-11)).mul(0.85),
       waterTone = mix(shallowTone, deepTone, depthMix).add(bed.mul(bedThrough));
+    // Tilting the surface changes how much sky and how much bed each point shows, so a
+    // passing wave brightens along one face and darkens along the other. Over the middle of
+    // the pool, where the bed is too deep to read and the reflection is weak at this angle,
+    // this is the only channel with enough contrast to carry the wave at all.
+    const waveShading = float(1).add(disturbance.mul(2.6)).max(0.15);
     const lightThroughWater = exp(distance(positionWorld.xz, this.lightPosition.xz).mul(-1.35)).mul(
         0.26,
       ),
-      litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater);
+      litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater).mul(waveShading);
     water.emissiveNode = color('#4f978a')
       .mul(lightThroughWater.mul(depthMix).mul(0.2))
       .add(color('#cfe6f2').mul(glitter.mul(depthMix.mul(0.55).add(0.45))));
@@ -1293,7 +1301,9 @@ export class Forest {
       reflection.target.rotation.x = -Math.PI / 2;
       reflection.target.position.y = -0.035;
       this.scene.add(reflection.target);
-      reflection.uvNode = screenUV.flipX().add(vec2(ripple.mul(0.1).add(still), ripple.mul(0.06)));
+      reflection.uvNode = screenUV
+        .flipX()
+        .add(vec2(disturbance.mul(0.16).add(still), disturbance.mul(0.1)));
       water.colorNode = mix(litWaterTone, reflection.rgb, fresnel.mul(0.55).add(0.07));
     } else {
       water.colorNode = litWaterTone;
@@ -1304,75 +1314,12 @@ export class Forest {
     water.opacityNode = smoothstep(0.003, 0.042, depth)
       .mul(smoothstep(1.21, 1.02, shoreRamp))
       .mul(fresnel.mul(0.2).add(0.8));
-    // Travelling rings, built once and shared. The same argument as the wavefront above:
-    // a mathematically round ring is the tell, so each carries its own irregular outline.
-    const bentRing = (seed: number) => {
-      // Wide enough to carry a crest rather than a stroke: the band fades to nothing at
-      // both edges through vertex colour, so it reads as a raised wave, not a drawn line.
-      const ring = new THREE.RingGeometry(0.93, 1.02, 96, 3);
-      const points = ring.attributes.position,
-        fade = new Float32Array(points.count * 3);
-      for (let i = 0; i < points.count; i++) {
-        const px = points.getX(i),
-          py = points.getY(i),
-          a = Math.atan2(py, px),
-          r = Math.hypot(px, py),
-          across = (r - 0.93) / 0.09,
-          profile = Math.sin(Math.min(1, Math.max(0, across)) * Math.PI) ** 0.8,
-          warp =
-            1 +
-            Math.sin(a * 3 + seed) * 0.055 +
-            Math.sin(a * 5 - seed * 1.4) * 0.032 +
-            Math.sin(a * 9 + seed * 0.7) * 0.014;
-        points.setXY(i, px * warp, py * warp);
-        fade[i * 3] = fade[i * 3 + 1] = fade[i * 3 + 2] = profile;
-      }
-      ring.setAttribute('color', new THREE.BufferAttribute(fade, 3));
-      ring.rotateX(-Math.PI / 2);
-      return ring;
-    };
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(geo, water);
     this.waterMesh.scale.set(POOL_RADIUS_X * 1.22, 1, POOL_RADIUS_Z * 1.22);
     this.waterMesh.position.set(0, WATER_LEVEL, POOL_CENTER_Z);
     this.scene.add(this.waterMesh);
-    for (let i = 0; i < 6; i++) {
-      const mat = new THREE.MeshBasicNodeMaterial({
-        color: '#b4dfe1',
-        vertexColors: true,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      mat.opacityNode = float(1)
-        .sub(smoothstep(0.95, 1, positionWorld.xz.sub(vec2(0, 1.1)).div(vec2(2.38, 1.57)).length()))
-        .mul(materialOpacity);
-      const ring = new THREE.Mesh(bentRing(i * 1.9 + 0.4), mat);
-      ring.position.set(this.dropPosition.x, -0.017 + i * 0.001, this.dropPosition.z);
-      ring.visible = false;
-      this.scene.add(ring);
-      this.rippleRings.push({ mesh: ring, born: -100, delay: i * 0.17 });
-    }
-    for (let i = 0; i < 4; i++) {
-      const mat = new THREE.MeshBasicNodeMaterial({
-        color: '#8dd6d0',
-        vertexColors: true,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      mat.opacityNode = float(1)
-        .sub(smoothstep(0.95, 1, positionWorld.xz.sub(vec2(0, 1.1)).div(vec2(2.38, 1.57)).length()))
-        .mul(materialOpacity);
-      const ring = new THREE.Mesh(bentRing(i * 2.3 + 3.1), mat);
-      ring.position.set(this.touchCenter.value.x, -0.016 + i * 0.001, this.touchCenter.value.y);
-      ring.visible = false;
-      this.scene.add(ring);
-      this.touchRings.push({ mesh: ring, born: -100, delay: i * 0.21 });
-    }
     const splatMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#b9e0e7',
       roughness: 0.1,
@@ -1722,11 +1669,6 @@ export class Forest {
     this.touchTime.value = this.elapsed;
     this.waveCenter.value.copy(point);
     this.waveTime.value = this.elapsed;
-    this.touchRings.forEach((r) => {
-      r.born = this.elapsed;
-      r.mesh.position.x = point.x;
-      r.mesh.position.z = point.z;
-    });
   }
   reset() {
     this.zoom = 0;
@@ -2289,34 +2231,11 @@ export class Forest {
       this.fallingDrop.visible = false;
       this.rippleTime.value = t;
       this.rippleCenter.value.set(this.fallingDrop.position.x, this.fallingDrop.position.z);
-      this.rippleRings.forEach((r) => {
-        r.born = t;
-        r.mesh.position.x = this.fallingDrop.position.x;
-        r.mesh.position.z = this.fallingDrop.position.z;
-      });
       this.events.onDrop();
     }
     this.heroDrop.visible = false;
-    const rippleAge = t - this.rippleTime.value;
-    this.rippleRings.forEach((r) => {
-      const a = t - r.born - r.delay;
-      const radius = 0.05 + a * 0.7;
-      r.mesh.visible = a >= 0 && a < 2.6;
-      if (r.mesh.visible) {
-        r.mesh.scale.setScalar(radius);
-        r.mesh.material.opacity = Math.max(0, 0.2 * (1 - a / 2.6));
-      }
-    });
-    const touchAge = t - this.touchTime.value;
-    this.touchRings.forEach((r) => {
-      const a = touchAge - r.delay;
-      const radius = 0.04 + a * 0.62;
-      r.mesh.visible = a >= 0 && a < 2.25;
-      if (r.mesh.visible) {
-        r.mesh.scale.setScalar(radius);
-        r.mesh.material.opacity = Math.max(0, 0.24 * (1 - a / 2.25));
-      }
-    });
+    const rippleAge = t - this.rippleTime.value,
+      touchAge = t - this.touchTime.value;
     this.splash.forEach((m, i) => {
       const a = rippleAge;
       m.visible = a >= 0 && a < 0.48;
