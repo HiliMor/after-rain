@@ -907,8 +907,9 @@ export class Forest {
     this.fallingDrop = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), waterMat);
     this.fallingDrop.visible = false;
     this.scene.add(this.fallingDrop);
-    this.runningDrop = new THREE.Mesh(waterDropGeometry(), waterMat);
-    this.runningDrop.scale.set(0.34, 0.46, 0.34);
+    // Water running across a leaf is a flattened dome wetting the surface, drawn out along
+    // the direction it travels - not the pendant it becomes only once it hangs at the tip.
+    this.runningDrop = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), waterMat);
     this.runningDrop.visible = false;
     this.heroLeaf.add(this.runningDrop);
     // A low, stretched lobe bridges the bead to the wet leaf while it is moving.
@@ -940,7 +941,7 @@ export class Forest {
           Math.sin(pathProgress * Math.PI * 3.1 + 0.8) * 0.09 * pathEnvelope +
           Math.sin(pathProgress * Math.PI * 1.2) * 0.02,
         // The smear is widest mid-run and narrows as the bead leaves and reaches the tip.
-        halfSpan = 0.022 + 0.026 * Math.sin(Math.min(1, along * 1.25) * Math.PI);
+        halfSpan = 0.03 + 0.032 * Math.sin(Math.min(1, along * 1.25) * Math.PI);
       for (const side of [-1, 1]) {
         const x = centre + side * halfSpan;
         trailVerts.push(x, trailSurface(slide, x), slide * 3.65);
@@ -969,7 +970,7 @@ export class Forest {
     // Fades in behind the bead, and softens across the ribbon so it has no cut edge.
     trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x))
       .mul(smoothstep(0.5, 0.16, uv().y.sub(0.5).abs()))
-      .mul(0.34);
+      .mul(0.46);
     this.dripTrail = new THREE.Mesh(trailGeo, trailMat);
     this.dripTrail.visible = false;
     this.heroLeaf.add(this.dripTrail);
@@ -1847,15 +1848,16 @@ export class Forest {
         pulse = 1 + Math.sin(t * 7.4 + progress * 5) * 0.06 * velocity;
       this.runningDrop.visible = birthEase > 0.005;
       this.heroDrop.visible = false;
-      this.runningDrop.position.set(x, y + 0.045, slide * 3.65);
-      this.runningDrop.rotation.x = 0.14 + Math.sin(progress * Math.PI * 2.4 + t) * 0.08;
-      this.runningDrop.rotation.y = Math.sin(progress * Math.PI * 3 + t * 1.4) * 0.1;
-      this.runningDrop.rotation.z = Math.sin(progress * Math.PI * 2 + t * 1.2) * 0.06;
-      this.runningDrop.scale.set(
-        0.32 * pulse * birthEase,
-        0.44 * (1 + velocity * 0.14) * pulse * birthEase,
-        (0.38 + velocity * 0.17) * pulse * birthEase,
-      );
+      const across = 0.098 * pulse * birthEase,
+        height = 0.044 * pulse * birthEase,
+        along = (0.108 + velocity * 0.03) * pulse * birthEase;
+      this.runningDrop.scale.set(across, height, along);
+      // Sunk very slightly into the blade so it wets the surface instead of resting on it.
+      this.runningDrop.position.set(x, y + height * 0.42, slide * 3.65);
+      // A bead running down a surface does not tumble; it lies along the slope it is on.
+      const ahead = slide + 0.02,
+        slope = Math.atan2(surfaceY(ahead, pathX(ahead, t)) - y, (ahead - slide) * 3.65);
+      this.runningDrop.rotation.set(-slope, 0, 0);
 
       // A sliding bead drags a short neck behind it, roughly its own length - not the
       // ten-diameter tube this used to stretch into.
@@ -1878,8 +1880,8 @@ export class Forest {
         Math.sin(progress * Math.PI * 1.4 + t * 0.8) * 0.035,
       );
       this.dripTail.scale.set(
-        (0.085 + velocity * 0.03) * birthEase,
-        (0.042 + velocity * 0.018) * birthEase,
+        across * 0.62,
+        height * 0.58,
         Math.max(0.03, tailSpan * 0.6) * birthEase,
       );
       for (let i = 0; i < 6; i++) {
@@ -1911,8 +1913,8 @@ export class Forest {
         this.fallingDrop.userData.startY = this.fallingDrop.position.y;
       }
       this.heroDrop.visible = false;
-      // Radius of the sphere holding the same water the pendant did on the leaf.
-      const radius = this.detachScale.x * 0.2,
+      // Radius of the sphere holding the same water the bead carried on the leaf.
+      const radius = Math.cbrt(this.detachScale.x * this.detachScale.y * this.detachScale.z),
         f = (age - slideDuration) / fallDuration,
         // Fall to where the underside of the bead meets the water, not an arbitrary zero.
         landing = WATER_LEVEL + radius,
