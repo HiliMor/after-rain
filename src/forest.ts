@@ -34,8 +34,11 @@ import {
   leafGeometry,
   mossBlade,
   mossShoot,
+  snailHeadGeometry,
+  snailMantleGeometry,
   snailShellGeometry,
   snailFootGeometry,
+  waterDropGeometry,
   fernGeometry,
   tube,
 } from './nature';
@@ -695,14 +698,14 @@ export class Forest {
     });
     this.heroLeaf.position.set(3.38, 3.16, -1.5);
     this.heroLeaf.rotation.set(0.18, -0.72, -0.08);
-    this.heroMesh = new THREE.Mesh(leafGeometry(3.65, 1.03, 0.37, 48), mat);
+    this.heroMesh = new THREE.Mesh(leafGeometry(3.65, 1.03, 0.52, 56, 12, 0.32), mat);
     this.heroLeaf.add(this.heroMesh);
     const veinMat = new THREE.MeshStandardNodeMaterial({ color: '#9aaf5d', roughness: 0.43 });
     const points = Array.from({ length: 28 }, (_, i) => {
       const t = i / 27;
       return new THREE.Vector3(
         0,
-        Math.sin(t * Math.PI) * 0.37 - Math.pow(t, 5) * 0.37 * 0.6 + 0.006,
+        Math.sin(t * Math.PI) * 0.52 - Math.pow(t, 5) * 0.52 * 0.6 + 0.006,
         t * 3.65,
       );
     });
@@ -744,22 +747,16 @@ export class Forest {
       attenuationDistance: 3,
       envMapIntensity: 1.3,
     });
-    const dropGeo = new THREE.SphereGeometry(0.235, 40, 32);
-    const p = dropGeo.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i),
-        f = 1 - Math.max(0, y / 0.235) * 0.5;
-      p.setXYZ(i, p.getX(i) * f, y * 1.32, p.getZ(i) * f);
-    }
-    dropGeo.computeVertexNormals();
+    const dropGeo = waterDropGeometry();
     this.heroDrop = new THREE.Mesh(dropGeo, waterMat);
-    this.heroDrop.position.set(0, -0.46, 3.6);
+    this.heroDrop.position.set(0, -0.235, 3.6);
+    this.heroDrop.scale.set(0.28, 0.42, 0.28);
     this.heroLeaf.add(this.heroDrop);
     this.fallingDrop = new THREE.Mesh(dropGeo, waterMat);
     this.fallingDrop.visible = false;
     this.scene.add(this.fallingDrop);
-    this.runningDrop = new THREE.Mesh(new THREE.SphereGeometry(0.092, 18, 12), waterMat);
-    this.runningDrop.scale.y = 0.65;
+    this.runningDrop = new THREE.Mesh(waterDropGeometry(), waterMat);
+    this.runningDrop.scale.set(0.34, 0.46, 0.34);
     this.runningDrop.visible = false;
     this.heroLeaf.add(this.runningDrop);
     const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), waterMat, 43);
@@ -788,10 +785,10 @@ export class Forest {
   private buildWater() {
     const water = new THREE.MeshPhysicalNodeMaterial({
       color: '#587c82',
-      metalness: 0.32,
-      roughness: 0.13,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
+      metalness: 0.12,
+      roughness: 0.24,
+      clearcoat: 0.58,
+      clearcoatRoughness: 0.16,
       side: THREE.DoubleSide,
     });
     water.name = 'pool-water';
@@ -803,18 +800,37 @@ export class Forest {
       .mul(0.07);
     const still = sin(positionWorld.x.mul(7).add(this.time.mul(0.4)))
       .mul(cos(positionWorld.z.mul(9).add(this.time.mul(0.5))))
-      .mul(0.0015)
+      .mul(0.005)
       .mul(this.motion);
-    water.normalNode = vec3(ripple.add(still), float(1), ripple.mul(0.7).add(still))
+    const swell = sin(positionWorld.x.mul(2.2).add(this.time.mul(0.23)))
+      .mul(cos(positionWorld.z.mul(3.4).sub(this.time.mul(0.18))))
+      .mul(0.015)
+      .mul(this.motion);
+    const crossWave = sin(
+      positionWorld.x.mul(11).sub(positionWorld.z.mul(8)).add(this.time.mul(0.48)),
+    )
+      .mul(0.004)
+      .mul(this.motion);
+    const normalX = ripple.add(still).add(swell).add(crossWave),
+      normalZ = ripple.mul(0.72).add(still.mul(0.8)).add(swell.mul(0.75)).sub(crossWave);
+    water.normalNode = vec3(normalX, float(1), normalZ)
       .normalize()
       .transformDirection(this.camera.matrixWorldInverse);
+    const shimmer = sin(
+      positionWorld.x.mul(5.4).add(positionWorld.z.mul(3.8)).add(this.time.mul(0.32)),
+    )
+      .mul(0.5)
+      .add(0.5);
+    const waterTone = mix(color('#0d2f39'), color('#3d6b65'), shimmer.mul(0.16).add(0.14));
     if (!this.mobile) {
       const reflection = reflector({ resolutionScale: 1, bounces: false });
       reflection.target.rotation.x = -Math.PI / 2;
       reflection.target.position.y = -0.035;
       this.scene.add(reflection.target);
       reflection.uvNode = screenUV.flipX().add(vec2(ripple.mul(0.1).add(still), ripple.mul(0.06)));
-      water.colorNode = mix(color('#183c46'), reflection.rgb, 0.44);
+      water.colorNode = mix(waterTone, reflection.rgb, 0.38);
+    } else {
+      water.colorNode = waterTone;
     }
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
@@ -876,51 +892,88 @@ export class Forest {
   }
 
   private buildSnail() {
-    this.snail.position.set(2.05, 0.2, 1.72);
+    this.snail.position.set(2.78, ground(2.78, 1.5) + 0.018, 1.5);
     this.snail.rotation.y = -0.4;
-    this.snail.scale.setScalar(0.7);
-    const bodyMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#c1bda4',
+    this.snail.scale.setScalar(0.68);
+    const footMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#74836c',
       map: this.detail.skinColor,
-      roughness: 0.86,
+      roughness: 0.98,
       roughnessMap: this.detail.skinRoughness,
       bumpMap: this.detail.skinHeight,
-      bumpScale: 0.018,
-      specularIntensity: 0.5,
-      clearcoat: 0.04,
-      clearcoatRoughness: 0.45,
+      bumpScale: 0.024,
+      specularIntensity: 0.14,
+      clearcoat: 0,
       side: THREE.DoubleSide,
     });
-    this.snail.add(new THREE.Mesh(snailFootGeometry(), bodyMat));
+    const bodyMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#9b916d',
+      map: this.detail.skinColor,
+      roughness: 0.96,
+      roughnessMap: this.detail.skinRoughness,
+      bumpMap: this.detail.skinHeight,
+      bumpScale: 0.02,
+      specularIntensity: 0.16,
+      clearcoat: 0,
+      side: THREE.DoubleSide,
+    });
+    const headMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#a69c76',
+      map: this.detail.skinColor,
+      roughness: 0.99,
+      roughnessMap: this.detail.skinRoughness,
+      bumpMap: this.detail.skinHeight,
+      bumpScale: 0.022,
+      specularIntensity: 0.12,
+      clearcoat: 0,
+      side: THREE.DoubleSide,
+    });
+    const mucusMat = new THREE.MeshStandardNodeMaterial({
+      color: '#536451',
+      roughness: 1,
+      transparent: true,
+      opacity: 0.13,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mucusTrail = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.14, 18, 2), mucusMat);
+    mucusTrail.rotation.x = -Math.PI / 2;
+    mucusTrail.position.set(0.14, 0.018, 0.012);
+    this.snail.add(mucusTrail);
+    this.snail.add(new THREE.Mesh(snailFootGeometry(), footMat));
     const shellMat = new THREE.MeshPhysicalNodeMaterial({
       map: this.detail.shellColor,
       bumpMap: this.detail.shellHeight,
-      bumpScale: 0.011,
+      bumpScale: 0.018,
       roughnessMap: this.detail.shellRoughness,
-      color: '#d7c6a5',
-      roughness: 0.92,
-      specularIntensity: 0.32,
-      clearcoat: 0.035,
-      clearcoatRoughness: 0.5,
+      color: '#a66f3f',
+      roughness: 0.98,
+      specularIntensity: 0.16,
+      clearcoat: 0,
       side: THREE.DoubleSide,
     });
     const shell = new THREE.Mesh(snailShellGeometry(), shellMat);
     shell.position.set(0.06, 0.3, -0.035);
+    shell.scale.set(1.08, 1, 0.9);
+    shell.rotation.z = -0.045;
     this.snail.add(shell);
-    const mantle = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), bodyMat);
-    mantle.position.set(0.02, 0.1, 0);
-    mantle.scale.set(0.31, 0.14, 0.15);
-    this.snail.add(mantle);
-    this.snailHead.position.set(-0.47, 0.1, 0);
+    this.snail.add(new THREE.Mesh(snailMantleGeometry(), bodyMat));
+    this.snailHead.position.set(-0.47, 0.06, 0);
     this.snail.add(this.snailHead);
-    const neck = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 16), bodyMat);
-    neck.scale.set(0.2, 0.16, 0.14);
-    neck.rotation.z = -0.5;
-    this.snailHead.add(neck);
+    this.snailHead.add(new THREE.Mesh(snailHeadGeometry(), headMat));
+    const mouthMat = new THREE.MeshStandardNodeMaterial({ color: '#49372a', roughness: 1 });
+    this.snailHead.add(
+      tube(
+        [new THREE.Vector3(-0.21, 0.045, 0.105), new THREE.Vector3(-0.255, 0.037, 0.11)],
+        0.008,
+        mouthMat,
+        8,
+      ),
+    );
     const eyeMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#121b16',
-      roughness: 0.13,
-      clearcoat: 1,
+      roughness: 0.35,
+      clearcoat: 0.35,
     });
     for (const side of [-1, 1]) {
       const tentacle = new THREE.Group();
@@ -958,7 +1011,7 @@ export class Forest {
       new THREE.SphereGeometry(0.67, 8, 6),
       new THREE.MeshBasicNodeMaterial({ visible: false }),
     );
-    this.snailHit.position.y = 0.35;
+    this.snailHit.position.y = 0.28;
     this.snail.add(this.snailHit);
     this.scene.add(this.snail);
   }
@@ -1055,6 +1108,8 @@ export class Forest {
     this.dropStarted = this.elapsed;
     this.impactDone = false;
     this.heroDrop.visible = true;
+    this.heroDrop.position.y = -0.235;
+    this.heroDrop.scale.set(0.28, 0.42, 0.28);
     this.snailFocusUntil = 0;
     return true;
   }
@@ -1277,8 +1332,8 @@ export class Forest {
       0.2 + this.currentZoom * 0.15,
     );
     if (focus) {
-      cam.set(2.6, 1.4, 5.5);
-      target.set(1.8, 0.5, 1.6);
+      cam.set(3.22, 1.48, 6.0);
+      target.set(2.52, 0.42, 1.5);
     }
     if (this.frame === 0 || this.reducedMotion.matches) {
       this.camera.position.copy(cam);
@@ -1329,7 +1384,11 @@ export class Forest {
       this.label.style.left = `${Math.min(this.container.clientWidth - this.label.offsetWidth - 15, (labelPosition.x * 0.5 + 0.5) * this.container.clientWidth + 27)}px`;
       this.label.style.top = `${(-labelPosition.y * 0.5 + 0.5) * this.container.clientHeight + 14}px`;
       this.label.style.opacity =
-        !focus && this.currentZoom < 0.3 && this.heroDrop.visible && labelPosition.x < 0.48
+        !focus &&
+        this.currentZoom < 0.3 &&
+        this.heroDrop.visible &&
+        this.heroDrop.scale.y > 0.58 &&
+        labelPosition.x < 0.48
           ? '.68'
           : '0';
     }
@@ -1355,18 +1414,30 @@ export class Forest {
   private updateDrop(t: number) {
     const age = t - this.dropStarted,
       motion = this.motion.value;
-    this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.45) * 0.006 * motion;
-    if (age < 1.05) {
-      const slide = 0.48 + Math.min(1, age / 0.85) * 0.5;
-      this.runningDrop.visible = age < 0.9;
+    this.heroLeaf.position.y = 3.16 + Math.sin(t * 0.23) * 0.024 * motion;
+    this.heroLeaf.position.z = -1.5 + Math.sin(t * 0.18 + 1.2) * 0.015 * motion;
+    this.heroLeaf.rotation.x = 0.18 + Math.sin(t * 0.27) * 0.018 * motion;
+    this.heroLeaf.rotation.y = -0.72 + Math.sin(t * 0.19 + 0.7) * 0.018 * motion;
+    this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.37) * 0.022 * motion;
+    if (age < 1.8) {
+      const progress = THREE.MathUtils.clamp(age / 1.8, 0, 1),
+        eased = progress * progress * (3 - 2 * progress),
+        slide = 0.52 + eased * 0.46;
+      this.runningDrop.visible = age > 0.32;
       this.runningDrop.position.set(
         0.025,
-        Math.sin(slide * Math.PI) * 0.37 - Math.pow(slide, 5) * 0.37 * 0.6 + 0.06,
+        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + 0.05,
         slide * 3.65,
       );
-      this.heroLeaf.rotation.z += Math.sin((age / 1.05) * Math.PI) * 0.075;
-      this.heroDrop.scale.set(1 - age * 0.16, 1 + age * 0.35, 1 - age * 0.16);
-    } else if (age < 1.75) {
+      this.heroLeaf.rotation.z += Math.sin(progress * Math.PI) * 0.11;
+      this.heroLeaf.rotation.x += Math.sin(progress * Math.PI) * 0.05;
+      this.heroDrop.position.y = THREE.MathUtils.lerp(-0.235, -0.39, eased);
+      this.heroDrop.scale.set(
+        THREE.MathUtils.lerp(0.28, 0.76, eased),
+        THREE.MathUtils.lerp(0.42, 1.12, eased),
+        THREE.MathUtils.lerp(0.28, 0.76, eased),
+      );
+    } else if (age < 2.55) {
       this.runningDrop.visible = false;
       if (this.heroDrop.visible) {
         this.heroDrop.getWorldPosition(this.fallingDrop.position);
@@ -1374,7 +1445,7 @@ export class Forest {
         this.fallingDrop.visible = true;
         this.fallingDrop.userData.startY = this.fallingDrop.position.y;
       }
-      const f = (age - 1.05) / 0.7;
+      const f = (age - 1.8) / 0.75;
       this.fallingDrop.position.y = this.fallingDrop.userData.startY * (1 - f * f);
       this.fallingDrop.scale.set(0.78, 1.25, 0.78);
     } else if (!this.impactDone) {
@@ -1389,9 +1460,15 @@ export class Forest {
       });
       this.events.onDrop();
     }
-    if (age >= 2.25) {
+    if (age >= 3.0) {
       this.heroDrop.visible = true;
-      this.heroDrop.scale.setScalar(Math.min(1, (age - 2.25) / 3.5));
+      this.heroDrop.position.y = -0.235;
+      const refill = THREE.MathUtils.clamp((age - 3.0) / 2.8, 0, 1);
+      this.heroDrop.scale.set(
+        THREE.MathUtils.lerp(0.22, 0.34, refill),
+        THREE.MathUtils.lerp(0.34, 0.68, refill),
+        THREE.MathUtils.lerp(0.22, 0.34, refill),
+      );
     }
     const rippleAge = t - this.rippleTime.value;
     this.rippleRings.forEach((r) => {
@@ -1433,7 +1510,9 @@ export class Forest {
     );
     if (near) this.discoverSnail();
     this.snailReveal = Math.min(1, this.snailReveal + 0.0006 * this.motion.value);
-    this.snail.position.x = 2.22 - this.snailReveal * 0.28 + this.snailRetraction * 0.06;
+    this.snail.position.x = 2.78 - this.snailReveal * 0.1 + this.snailRetraction * 0.06;
+    this.snail.position.z = 1.5 + Math.sin(t * 0.34) * 0.012 * this.motion.value;
+    this.snail.position.y = ground(this.snail.position.x, this.snail.position.z) + 0.018;
     this.snailHead.scale.x = 1 - this.snailRetraction * 0.5;
     this.snailHead.position.x = -0.47 + this.snailRetraction * 0.1;
     this.tentacles.forEach((tentacle, i) => {

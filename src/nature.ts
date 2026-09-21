@@ -249,6 +249,7 @@ export function leafGeometry(
   curl = 0.35,
   segments = 28,
   columns = 8,
+  cup = 0,
 ) {
   const verts: number[] = [],
     uvs: number[] = [],
@@ -261,7 +262,7 @@ export function leafGeometry(
       verts.push(
         q * w * (1 + 0.045 * Math.sin(t * 67 + q * 1.7) + 0.02 * Math.sin(t * 113)),
         Math.sin(t * Math.PI) * curl -
-          q * q * w * 0.12 -
+          q * q * w * (0.12 - cup) -
           Math.pow(t, 5) * curl * 0.6 +
           Math.sin(t * 31 + q * 2) * Math.abs(q) * w * 0.045,
         t * length,
@@ -277,6 +278,33 @@ export function leafGeometry(
   g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   g.setIndex(indices);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A gravity-shaped bead with a narrow neck where it clings to the leaf. */
+export function waterDropGeometry() {
+  const profile = [
+    new THREE.Vector2(0, -0.22),
+    new THREE.Vector2(0.05, -0.2),
+    new THREE.Vector2(0.1, -0.14),
+    new THREE.Vector2(0.14, -0.04),
+    new THREE.Vector2(0.145, 0.08),
+    new THREE.Vector2(0.115, 0.18),
+    new THREE.Vector2(0.075, 0.25),
+    new THREE.Vector2(0.028, 0.3),
+    new THREE.Vector2(0, 0.315),
+  ];
+  const g = new THREE.LatheGeometry(profile, 32);
+  const positions = g.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i),
+      y = positions.getY(i),
+      z = positions.getZ(i),
+      angle = Math.atan2(z, x),
+      wobble = 1 + Math.sin(angle * 3.0 + y * 17) * 0.035 + Math.cos(angle * 5.0) * 0.018;
+    positions.setXYZ(i, x * wobble, y + Math.sin(angle * 2.0) * 0.003, z * wobble);
+  }
   g.computeVertexNormals();
   return g;
 }
@@ -403,13 +431,17 @@ export function snailFootGeometry() {
     sides = 20;
   for (let i = 0; i <= rings; i++) {
     const t = i / rings,
-      width = 0.19 * Math.pow(Math.sin(Math.PI * t), 0.55) * (1.25 - t * 0.55);
+      width =
+        0.19 *
+        Math.pow(Math.sin(Math.PI * t), 0.48) *
+        (1.25 - t * 0.55) *
+        (0.88 + Math.sin(t * 19) * 0.06 + Math.sin(t * 43) * 0.03);
     for (let j = 0; j <= sides; j++) {
       const phi = (j / sides) * Math.PI,
-        edge = Math.sin(t * 100) * 0.003;
+        edge = Math.sin(t * 100) * 0.003 + Math.sin(t * 31 + j) * 0.002;
       vertices.push(
-        -0.62 + t * 1.57,
-        0.016 + Math.sin(phi) * width * 0.57 + edge,
+        -0.62 + t * 1.57 + Math.sin(t * 15) * 0.012,
+        0.016 + Math.sin(phi) * width * (0.52 + Math.sin(t * 11) * 0.06) + edge,
         Math.cos(phi) * (width + edge),
       );
       uvs.push(t, j / sides);
@@ -423,6 +455,47 @@ export function snailFootGeometry() {
   g.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   g.setIndex(indices);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Low, irregular head and mantle volumes keep the snail from reading as stacked spheres. */
+export function snailHeadGeometry() {
+  const g = new THREE.SphereGeometry(1, 24, 16);
+  const positions = g.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i),
+      y = positions.getY(i),
+      z = positions.getZ(i),
+      angle = Math.atan2(z, x),
+      wobble = 1 + Math.sin(angle * 3.0 + y * 4.0) * 0.07 + Math.sin(angle * 7.0) * 0.025,
+      underside = y < -0.25 ? 0.72 : 1;
+    positions.setXYZ(
+      i,
+      x * 0.235 * wobble - 0.02,
+      0.07 + y * 0.145 * underside + Math.sin(x * 5.0 + z * 2.0) * 0.006,
+      z * 0.135 * wobble,
+    );
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+export function snailMantleGeometry() {
+  const g = new THREE.SphereGeometry(1, 24, 14);
+  const positions = g.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i),
+      y = positions.getY(i),
+      z = positions.getZ(i),
+      wobble = 1 + Math.sin(z * 8.0 + x * 3.0) * 0.055;
+    positions.setXYZ(
+      i,
+      x * 0.32 * wobble + 0.025,
+      0.105 + y * 0.115 * (y < -0.1 ? 0.68 : 1),
+      z * 0.155 * wobble,
+    );
+  }
   g.computeVertexNormals();
   return g;
 }

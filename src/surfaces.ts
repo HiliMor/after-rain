@@ -145,9 +145,9 @@ export function makeDetailMaps() {
       put(
         'skinColor',
         i,
-        91 + cell * 22 + broad * 19,
-        87 + cell * 20 + broad * 14,
-        66 + cell * 16 + broad * 13,
+        70 + cell * 38 + broad * 35 + fine * 8,
+        68 + cell * 35 + broad * 28 + fine * 7,
+        48 + cell * 27 + broad * 25 + fine * 6,
       );
       put('skinRoughness', i, 115 + (1 - cell) * 75 + broad * 25);
       const growth = Math.pow(0.5 + 0.5 * Math.sin(u * 1200 + medium * 3), 5);
