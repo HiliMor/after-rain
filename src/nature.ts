@@ -256,15 +256,20 @@ export function leafGeometry(
     indices: number[] = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments,
-      w = Math.pow(Math.sin(Math.PI * t), 0.82) * width;
+      // The blade meets its petiole with a real, if narrow, width. Collapsing it to a
+      // single point left a fan of zero-area triangles whose normals shaded black.
+      w = (Math.pow(Math.sin(Math.PI * t), 0.82) + 0.04 * (1 - t)) * width;
+    // A blade flattens out where it joins the petiole. Carrying the full cup all the way
+    // to the base folded it into a deep enclosed trough that rendered as a black notch.
+    const flatten = Math.min(1, t / 0.18);
     for (let j = 0; j <= columns; j++) {
       const q = j / (columns / 2) - 1;
       verts.push(
         q * w * (1 + 0.045 * Math.sin(t * 67 + q * 1.7) + 0.02 * Math.sin(t * 113)),
         Math.sin(t * Math.PI) * curl -
-          q * q * w * (0.12 - cup) -
+          q * q * w * (0.12 - cup) * flatten -
           Math.pow(t, 5) * curl * 0.6 +
-          Math.sin(t * 31 + q * 2) * Math.abs(q) * w * 0.045,
+          Math.sin(t * 31 + q * 2) * Math.abs(q) * w * 0.045 * flatten,
         t * length,
       );
       uvs.push(j / columns, t);

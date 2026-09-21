@@ -836,6 +836,9 @@ export class Forest {
       sheenColor: '#a6ba70',
       sheenRoughness: 0.5,
     });
+    // A leaf underside still catches bounce light at night. Without a floor under it the
+    // back faces crushed to pure black and read as a hole torn in the blade.
+    mat.emissiveNode = color('#2c4030').mul(0.2);
     this.heroLeaf.position.set(3.38, 3.16, -1.5);
     this.heroLeaf.rotation.set(0.18, -0.72, -0.08);
     this.heroMesh = new THREE.Mesh(leafGeometry(3.65, 1.03, 0.52, 56, 12, 0.32), mat);
@@ -905,35 +908,62 @@ export class Forest {
     this.dripTail = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), waterMat);
     this.dripTail.visible = false;
     this.heroLeaf.add(this.dripTail);
-    const trailPoints = Array.from({ length: 28 }, (_, i) => {
-      const slide = 0.52 + (i / 27) * 0.46;
-      const pathProgress = (slide - 0.46) / 0.5,
+    // Water left behind on a leaf is a wet film, not a rod lying across it. The trail is a
+    // narrow ribbon laid on the blade, each edge sampling the surface at its own offset so
+    // it follows the cup instead of cutting through it.
+    const trailSurface = (slide: number, x: number) => {
+      const halfWidth = Math.max(0.16, Math.pow(Math.sin(slide * Math.PI), 0.82) * 1.03);
+      return (
+        Math.sin(slide * Math.PI) * 0.52 -
+        Math.pow(slide, 5) * 0.52 * 0.6 +
+        (x / halfWidth) * (x / halfWidth) * halfWidth * 0.2 +
+        0.012
+      );
+    };
+    const trailVerts: number[] = [],
+      trailUvs: number[] = [],
+      trailIndex: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const along = i / 29,
+        slide = 0.52 + along * 0.46,
+        pathProgress = (slide - 0.46) / 0.5,
         pathEnvelope = Math.sin(pathProgress * Math.PI),
-        x =
+        centre =
           0.018 +
           Math.sin(pathProgress * Math.PI * 3.1 + 0.8) * 0.09 * pathEnvelope +
           Math.sin(pathProgress * Math.PI * 1.2) * 0.02,
-        halfWidth = Math.max(0.16, Math.pow(Math.sin(slide * Math.PI), 0.82) * 1.03),
-        edgeLift = (x / halfWidth) * (x / halfWidth) * halfWidth * 0.2;
-      return new THREE.Vector3(
-        x,
-        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + edgeLift + 0.038,
-        slide * 3.65,
-      );
-    });
+        // The smear is widest mid-run and narrows as the bead leaves and reaches the tip.
+        halfSpan = 0.022 + 0.026 * Math.sin(Math.min(1, along * 1.25) * Math.PI);
+      for (const side of [-1, 1]) {
+        const x = centre + side * halfSpan;
+        trailVerts.push(x, trailSurface(slide, x), slide * 3.65);
+        trailUvs.push(along, side * 0.5 + 0.5);
+      }
+      if (i < 29) {
+        const a = i * 2;
+        trailIndex.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    }
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(trailVerts, 3));
+    trailGeo.setAttribute('uv', new THREE.Float32BufferAttribute(trailUvs, 2));
+    trailGeo.setIndex(trailIndex);
+    trailGeo.computeVertexNormals();
     const trailMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#74b694',
-      roughness: 0.13,
-      metalness: 0.04,
+      color: '#8fc6a8',
+      roughness: 0.2,
+      metalness: 0.02,
+      clearcoat: 0.6,
+      clearcoatRoughness: 0.2,
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x)).mul(0.36);
-    this.dripTrail = new THREE.Mesh(
-      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(trailPoints), 26, 0.021, 6, false),
-      trailMat,
-    );
+    // Fades in behind the bead, and softens across the ribbon so it has no cut edge.
+    trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x))
+      .mul(smoothstep(0.5, 0.16, uv().y.sub(0.5).abs()))
+      .mul(0.34);
+    this.dripTrail = new THREE.Mesh(trailGeo, trailMat);
     this.dripTrail.visible = false;
     this.heroLeaf.add(this.dripTrail);
     this.dripBeads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), waterMat, 6);
@@ -941,16 +971,24 @@ export class Forest {
     this.heroLeaf.add(this.dripBeads);
     const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), waterMat, 43);
     for (let i = 0; i < 43; i++) {
-      const t = range(0.1, 0.82),
+      const t = range(0.12, 0.84),
         w = Math.pow(Math.sin(t * Math.PI), 0.82) * 1.03,
-        q = range(-0.8, 0.8),
-        s = range(0.014, 0.048);
+        q = range(-0.84, 0.84),
+        s = range(0.014, 0.046);
+      // These have to be read off the leaf the scene actually builds. They were being
+      // placed on an older, shallower surface with the cup inverted, which left them
+      // hanging in the air beside the blade instead of resting in it.
       this.dummy.position.set(
-        q * w,
-        Math.sin(t * Math.PI) * 0.37 - q * q * w * 0.22 - Math.pow(t, 5) * 0.37 * 0.6 + s * 0.52,
+        q * w * (1 + 0.045 * Math.sin(t * 67 + q * 1.7) + 0.02 * Math.sin(t * 113)),
+        Math.sin(t * Math.PI) * 0.52 +
+          q * q * w * 0.2 * Math.min(1, t / 0.18) -
+          Math.pow(t, 5) * 0.52 * 0.6 +
+          Math.sin(t * 31 + q * 2) * Math.abs(q) * w * 0.045 * Math.min(1, t / 0.18) +
+          s * 0.34,
         t * 3.65,
       );
-      this.dummy.scale.set(s, s * 0.7, s);
+      // Water on a leaf wets down into a shallow lens, it does not sit up like a marble.
+      this.dummy.scale.set(s * 1.12, s * 0.46, s * 1.12);
       this.dummy.rotation.set(0, 0, 0);
       this.dummy.updateMatrix();
       beads.setMatrixAt(i, this.dummy.matrix);
@@ -1769,7 +1807,9 @@ export class Forest {
         (0.38 + velocity * 0.17) * pulse * birthEase,
       );
 
-      const tailLength = 0.1 + velocity * 0.16,
+      // A sliding bead drags a short neck behind it, roughly its own length - not the
+      // ten-diameter tube this used to stretch into.
+      const tailLength = 0.032 + velocity * 0.042,
         tailBehind = Math.max(slideStart, slide - tailLength),
         tailFront = Math.max(tailBehind + 0.012, slide - 0.008),
         behindX = pathX(tailBehind, t - 0.15),
@@ -1788,9 +1828,9 @@ export class Forest {
         Math.sin(progress * Math.PI * 1.4 + t * 0.8) * 0.035,
       );
       this.dripTail.scale.set(
-        (0.07 + velocity * 0.024) * birthEase,
-        (0.038 + velocity * 0.016) * birthEase,
-        Math.max(0.02, tailSpan * 0.5),
+        (0.085 + velocity * 0.03) * birthEase,
+        (0.042 + velocity * 0.018) * birthEase,
+        Math.max(0.03, tailSpan * 0.6) * birthEase,
       );
       for (let i = 0; i < 6; i++) {
         const beadT = i / 5,
