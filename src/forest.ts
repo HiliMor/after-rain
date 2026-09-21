@@ -23,6 +23,7 @@ import {
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
+import { loadNaturalSurfaces, makeDetailMaps } from './surfaces';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   makeTextures,
@@ -32,6 +33,9 @@ import {
   rand,
   leafGeometry,
   mossBlade,
+  mossShoot,
+  snailShellGeometry,
+  snailFootGeometry,
   fernGeometry,
   tube,
 } from './nature';
@@ -56,6 +60,8 @@ export class Forest {
   readonly raycaster = new THREE.Raycaster();
   readonly pointer = new THREE.Vector2(0.2, -0.1);
   readonly textures = makeTextures();
+  private readonly naturalSurfaces = loadNaturalSurfaces();
+  private readonly detail = makeDetailMaps();
   readonly lightPosition = uniform(new THREE.Vector3(0.3, 0.4, 2));
   readonly time = uniform(0);
   readonly waveCenter = uniform(new THREE.Vector3(0.3, 0, 1));
@@ -65,6 +71,7 @@ export class Forest {
   readonly motion = uniform(1);
   readonly focusDistance = uniform(7.8);
   private pipeline!: THREE.RenderPipeline;
+  private keyShadow?: THREE.LightShadow;
   private heroLeaf = new THREE.Group();
   private heroMesh!: THREE.Mesh;
   private heroDrop!: THREE.Mesh;
@@ -130,7 +137,9 @@ export class Forest {
     });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1.35 : 1.65));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.23;
+    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight, false);
     this.renderer.domElement.setAttribute('aria-hidden', 'true');
     this.container.append(this.renderer.domElement);
@@ -149,12 +158,25 @@ export class Forest {
     this.buildWater();
     this.buildSnail();
     this.buildAtmosphere();
+    this.scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const material = Array.isArray(object.material) ? object.material[0] : object.material;
+      if (
+        material instanceof THREE.MeshStandardNodeMaterial &&
+        !(material instanceof THREE.MeshPhysicalNodeMaterial && material.transmission > 0)
+      ) {
+        object.receiveShadow = true;
+        object.castShadow =
+          !(object instanceof THREE.InstancedMesh) && material.name !== 'pool-water';
+      }
+    });
     this.resize();
     this.bindEvents();
   }
 
   async start() {
     try {
+      await this.naturalSurfaces.ready;
       await this.renderer.init();
       const scenePass = pass(this.scene, this.camera);
       const output = scenePass.getTextureNode('output');
@@ -183,12 +205,28 @@ export class Forest {
   }
 
   private buildLighting() {
-    this.scene.add(new THREE.HemisphereLight(0x88bbd8, 0x233323, 1.35));
-    const moon = new THREE.DirectionalLight(0x9bdaff, 3.4);
+    this.scene.add(new THREE.HemisphereLight(0x9bbcc8, 0x343d22, 1.85));
+    const moon = new THREE.DirectionalLight(0xa7d2ed, 2.15);
     moon.position.set(-3, 7, -5);
     this.scene.add(moon);
-    const front = new THREE.DirectionalLight(0xb2d7d2, 2.1);
-    front.position.set(2, 5, 6);
+    const front = new THREE.DirectionalLight(0xc4d6bb, 1.65);
+    front.position.set(-2.5, 6, 5);
+    front.castShadow = true;
+    front.shadow.mapSize.setScalar(this.mobile ? 1024 : 2048);
+    Object.assign(front.shadow.camera, {
+      left: -7,
+      right: 7,
+      top: 7,
+      bottom: -7,
+      near: 0.5,
+      far: 22,
+    });
+    front.shadow.normalBias = 0.025;
+    front.shadow.bias = -0.0002;
+    front.shadow.radius = 3;
+    front.shadow.autoUpdate = false;
+    front.shadow.needsUpdate = true;
+    this.keyShadow = front.shadow;
     this.scene.add(front);
     const rim = new THREE.PointLight(0x67bcb4, 6, 12, 2);
     rim.position.set(0, 3, -2.8);
@@ -205,18 +243,25 @@ export class Forest {
     for (let i = 0; i < p.count; i++) p.setY(i, ground(p.getX(i), p.getZ(i)) - 0.055);
     terrain.computeVertexNormals();
     const mat = new THREE.MeshStandardNodeMaterial({
-      color: '#606b48',
-      map: this.textures.earth,
-      bumpMap: this.textures.earth,
-      bumpScale: 0.11,
-      roughness: 0.79,
+      color: '#8b9a72',
+      map: this.naturalSurfaces.maps.groundColor,
+      normalMap: this.naturalSurfaces.maps.groundNormal,
+      normalScale: new THREE.Vector2(0.75, 0.75),
+      roughnessMap: this.naturalSurfaces.maps.groundArm,
+      aoMap: this.naturalSurfaces.maps.groundArm,
+      aoMapIntensity: 0.85,
+      roughness: 1,
     });
     this.scene.add(new THREE.Mesh(terrain, mat));
     const pebbleMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#526563',
-      roughness: 0.28,
-      clearcoat: 0.9,
-      clearcoatRoughness: 0.2,
+      color: '#85816c',
+      roughness: 0.87,
+      roughnessMap: this.detail.leafRoughness,
+      bumpMap: this.detail.grainHeight,
+      bumpScale: 0.027,
+      specularIntensity: 0.3,
+      clearcoat: 0.04,
+      clearcoatRoughness: 0.6,
     });
     const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), pebbleMat, 190);
     for (let i = 0; i < 190; i++) {
@@ -234,9 +279,8 @@ export class Forest {
     this.scene.add(pebbles);
     const treeMat = new THREE.MeshStandardNodeMaterial({
       color: '#233938',
-      map: this.textures.bark,
-      bumpMap: this.textures.bark,
-      bumpScale: 0.17,
+      map: this.naturalSurfaces.maps.barkColor,
+      normalMap: this.naturalSurfaces.maps.barkNormal,
       roughness: 0.9,
     });
     this.trees = new THREE.InstancedMesh(
@@ -256,20 +300,24 @@ export class Forest {
 
   private buildMoss() {
     const mat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#b7cfa1',
-      roughness: 0.59,
+      color: '#aabc77',
+      roughness: 0.95,
+      roughnessMap: this.detail.leafRoughness,
+      bumpMap: this.detail.leafHeight,
+      bumpScale: 0.006,
       metalness: 0,
-      clearcoat: 0.35,
-      clearcoatRoughness: 0.35,
+      specularIntensity: 0.17,
+      clearcoat: 0,
       side: THREE.DoubleSide,
     });
+    mat.colorNode = color('#a9b882').mul(mix(0.38, 1, uv().y));
     const d = distance(positionWorld.xz, this.lightPosition.xz);
     const waveD = distance(positionWorld.xz, this.waveCenter.xz);
     const age = this.time.sub(this.waveTime);
     const wave = exp(waveD.sub(age.mul(1.5)).pow(2).mul(-4))
       .mul(exp(age.mul(-0.75)))
       .mul(0.36);
-    mat.emissiveNode = color('#6fa772').mul(exp(d.mul(-1.6)).mul(0.3).add(wave));
+    mat.emissiveNode = color('#6fa772').mul(exp(d.mul(-1.6)).mul(0.12).add(wave));
     mat.positionNode = positionLocal.add(
       vec3(
         sin(this.time.mul(0.65).add(positionLocal.y.mul(2)))
@@ -280,7 +328,7 @@ export class Forest {
         0,
       ),
     );
-    const count = this.mobile ? 18500 : 34000;
+    const count = this.mobile ? 17000 : 28000;
     const moss = new THREE.InstancedMesh(mossBlade(), mat, count);
     for (let i = 0; i < count; i++) {
       let x: number, z: number;
@@ -288,7 +336,7 @@ export class Forest {
         x = range(-9, 9);
         z = range(-6.5, 5.8);
       } while (!outsidePool(x, z, 1.02) || (x > 1.8 && x < 3.8 && z > -0.7 && z < 1.2));
-      const h = range(0.065, 0.23) * (1 + 0.7 * Math.sin(x * 2.8) * Math.sin(z * 2.3));
+      const h = range(0.035, 0.12) * (1 + 0.8 * Math.sin(x * 3.2) * Math.sin(z * 3.7));
       this.dummy.position.set(x, ground(x, z), z);
       this.dummy.rotation.set(range(-0.5, 0.5), rand() * 6.28, range(-0.4, 0.4));
       this.dummy.scale.set(h * range(0.5, 1.4), h, h);
@@ -300,50 +348,17 @@ export class Forest {
       );
     }
     this.scene.add(moss);
-    // Whorled upright shoots break up the grass silhouette into little moss trees.
-    const shootGeo = new THREE.BufferGeometry();
-    const vertices: number[] = [],
-      uvs: number[] = [];
-    for (let j = 0; j < 7; j++)
-      for (let k = 0; k < 4; k++) {
-        const a = (k * Math.PI) / 2 + j * 0.6,
-          y = j * 0.09,
-          w = (1 - j / 9) * 0.18,
-          dx = Math.cos(a) * w,
-          dz = Math.sin(a) * w;
-        vertices.push(
-          0,
-          y,
-          0,
-          dx - dz * 0.17,
-          y + 0.09,
-          dz + dx * 0.17,
-          dx,
-          y + 0.18,
-          dz,
-          0,
-          y,
-          0,
-          dx,
-          y + 0.18,
-          dz,
-          dx + dz * 0.17,
-          y + 0.09,
-          dz - dx * 0.17,
-        );
-        uvs.push(0.5, 0, 0, 0.5, 0.5, 1, 0.5, 0, 0.5, 1, 1, 0.5);
-      }
-    shootGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    shootGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    shootGeo.computeVertexNormals();
-    const shoots = new THREE.InstancedMesh(shootGeo, mat, 2200);
-    for (let i = 0; i < 2200; i++) {
+    // Each patch has many fine curled leaflets and an irregular, cushioned outline.
+    const shootGeo = mossShoot();
+    const shootCount = this.mobile ? 1900 : 2800;
+    const shoots = new THREE.InstancedMesh(shootGeo, mat, shootCount);
+    for (let i = 0; i < shootCount; i++) {
       let x: number, z: number;
       do {
         x = range(-5.5, 5.5);
         z = range(-3.5, 4.2);
       } while (!outsidePool(x, z, 1.1));
-      const s = range(0.2, 0.7);
+      const s = range(0.25, 0.6) * (1 + 0.45 * Math.sin(x * 3.2) * Math.sin(z * 3.7));
       this.dummy.position.set(x, ground(x, z), z);
       this.dummy.scale.setScalar(s);
       this.dummy.rotation.set(range(-0.3, 0.3), rand() * 7, range(-0.4, 0.4));
@@ -358,9 +373,13 @@ export class Forest {
     const fernMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#9dac73',
       map: this.textures.leaf,
-      roughness: 0.64,
-      clearcoat: 0.23,
-      clearcoatRoughness: 0.4,
+      roughness: 0.91,
+      roughnessMap: this.detail.leafRoughness,
+      bumpMap: this.detail.leafHeight,
+      bumpScale: 0.014,
+      specularIntensity: 0.25,
+      clearcoat: 0.025,
+      clearcoatRoughness: 0.6,
       side: THREE.DoubleSide,
     });
     const fernGeo = fernGeometry();
@@ -393,7 +412,10 @@ export class Forest {
       new THREE.MeshPhysicalNodeMaterial({
         color: '#b6c190',
         map: this.textures.leaf,
-        roughness: 0.61,
+        roughness: 0.88,
+        bumpMap: this.detail.leafHeight,
+        bumpScale: 0.014,
+        specularIntensity: 0.22,
         side: THREE.DoubleSide,
         emissive: '#314638',
         emissiveIntensity: 0.12,
@@ -406,11 +428,13 @@ export class Forest {
     const leafMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#98ad69',
       map: this.textures.leaf,
-      bumpMap: this.textures.leaf,
-      bumpScale: 0.035,
-      roughness: 0.48,
-      clearcoat: 0.5,
-      clearcoatRoughness: 0.27,
+      bumpMap: this.detail.leafHeight,
+      bumpScale: 0.024,
+      roughnessMap: this.detail.leafRoughness,
+      roughness: 0.88,
+      specularIntensity: 0.3,
+      clearcoat: 0.04,
+      clearcoatRoughness: 0.5,
       side: THREE.DoubleSide,
     });
     const stemMat = new THREE.MeshStandardNodeMaterial({ color: '#4d6b3b', roughness: 0.54 });
@@ -478,12 +502,16 @@ export class Forest {
 
   private buildBark() {
     const material = new THREE.MeshPhysicalNodeMaterial({
-      color: '#a1967e',
-      map: this.textures.bark,
-      bumpMap: this.textures.bark,
-      bumpScale: 0.27,
-      roughness: 0.94,
-      clearcoat: 0.035,
+      color: '#aaa28b',
+      map: this.naturalSurfaces.maps.barkColor,
+      normalMap: this.naturalSurfaces.maps.barkNormal,
+      normalScale: new THREE.Vector2(1.1, 1.1),
+      roughnessMap: this.naturalSurfaces.maps.barkArm,
+      aoMap: this.naturalSurfaces.maps.barkArm,
+      aoMapIntensity: 1,
+      roughness: 1,
+      specularIntensity: 0.2,
+      clearcoat: 0,
     });
     const geo = new THREE.CylinderGeometry(0.49, 0.67, 4.6, 64, 42, true);
     const p = geo.attributes.position;
@@ -539,18 +567,21 @@ export class Forest {
 
   private buildMushrooms() {
     const capMat = new THREE.MeshPhysicalNodeMaterial({
-      map: this.textures.cap,
-      bumpMap: this.textures.cap,
-      bumpScale: 0.04,
-      color: '#e1c38b',
-      roughness: 0.53,
-      clearcoat: 0.3,
-      clearcoatRoughness: 0.33,
+      map: this.detail.capColor,
+      bumpMap: this.detail.capHeight,
+      bumpScale: 0.024,
+      roughnessMap: this.detail.capRoughness,
+      color: '#efdbc3',
+      roughness: 0.96,
+      specularIntensity: 0.27,
+      clearcoat: 0,
       side: THREE.DoubleSide,
     });
     const stemMat = new THREE.MeshStandardNodeMaterial({
-      color: '#c7c3a1',
-      roughness: 0.64,
+      color: '#c7bba3',
+      roughness: 0.96,
+      bumpMap: this.detail.grainHeight,
+      bumpScale: 0.018,
       emissive: '#536749',
       emissiveIntensity: 0.14,
     });
@@ -601,7 +632,29 @@ export class Forest {
         new THREE.Vector2(0.49, 1.01),
         new THREE.Vector2(0.1, 1.025),
       ];
-      const cap = new THREE.Mesh(new THREE.LatheGeometry(profile, 40), capMat);
+      const capGeometry = new THREE.LatheGeometry(new THREE.SplineCurve(profile).getPoints(36), 72);
+      const points = capGeometry.attributes.position,
+        coords = capGeometry.attributes.uv;
+      const variation = x * 13 + z * 7;
+      for (let i = 0; i < points.count; i++) {
+        const px = points.getX(i),
+          py = points.getY(i),
+          pz = points.getZ(i),
+          a = Math.atan2(px, pz),
+          radius = Math.hypot(px, pz),
+          edge = radius / 0.57;
+        const wobble =
+          1 + Math.sin(a * 5 + variation) * 0.035 + Math.cos(a * 9 - variation) * 0.016;
+        points.setXYZ(
+          i,
+          px * wobble,
+          py + Math.sin(a * 6 + variation) * 0.013 * edge + Math.sin(a * 23) * 0.007 * edge ** 4,
+          pz * wobble,
+        );
+        coords.setXY(i, (a + Math.PI) / (Math.PI * 2), edge);
+      }
+      capGeometry.computeVertexNormals();
+      const cap = new THREE.Mesh(capGeometry, capMat);
       group.add(cap);
       const gills: THREE.BufferGeometry[] = [];
       for (let i = 0; i < 36; i++) {
@@ -627,14 +680,16 @@ export class Forest {
   private buildHero() {
     const mat = new THREE.MeshPhysicalNodeMaterial({
       map: this.textures.leaf,
-      bumpMap: this.textures.leaf,
-      bumpScale: 0.025,
-      color: '#c9d8a1',
-      roughness: 0.38,
-      clearcoat: 0.75,
-      clearcoatRoughness: 0.26,
+      bumpMap: this.detail.leafHeight,
+      bumpScale: 0.032,
+      roughnessMap: this.detail.leafRoughness,
+      color: '#d4dcb6',
+      roughness: 0.8,
+      specularIntensity: 0.42,
+      clearcoat: 0.07,
+      clearcoatRoughness: 0.38,
       side: THREE.DoubleSide,
-      sheen: 0.4,
+      sheen: 0.12,
       sheenColor: '#a6ba70',
       sheenRoughness: 0.5,
     });
@@ -654,8 +709,11 @@ export class Forest {
     this.heroLeaf.add(tube(points, 0.012, veinMat, 28));
     const stemMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#527948',
-      roughness: 0.44,
-      clearcoat: 0.8,
+      roughness: 0.8,
+      bumpMap: this.detail.grainHeight,
+      bumpScale: 0.012,
+      specularIntensity: 0.25,
+      clearcoat: 0.04,
     });
     this.scene.add(
       tube(
@@ -736,6 +794,7 @@ export class Forest {
       clearcoatRoughness: 0.08,
       side: THREE.DoubleSide,
     });
+    water.name = 'pool-water';
     const d = distance(positionWorld.xz, this.rippleCenter),
       age = this.time.sub(this.rippleTime);
     const ripple = sin(d.mul(22).sub(age.mul(9)))
@@ -803,8 +862,12 @@ export class Forest {
         new THREE.MeshPhysicalNodeMaterial({
           color: '#8e6935',
           map: this.textures.leaf,
-          roughness: 0.38,
-          clearcoat: 1,
+          roughness: 0.82,
+          roughnessMap: this.detail.leafRoughness,
+          bumpMap: this.detail.leafHeight,
+          bumpScale: 0.02,
+          specularIntensity: 0.3,
+          clearcoat: 0.06,
           side: THREE.DoubleSide,
         }),
       ),
@@ -817,56 +880,37 @@ export class Forest {
     this.snail.rotation.y = -0.4;
     this.snail.scale.setScalar(0.7);
     const bodyMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#7c8070',
-      roughness: 0.52,
-      clearcoat: 0.36,
-      clearcoatRoughness: 0.34,
-      bumpMap: this.textures.earth,
-      bumpScale: 0.055,
+      color: '#c1bda4',
+      map: this.detail.skinColor,
+      roughness: 0.86,
+      roughnessMap: this.detail.skinRoughness,
+      bumpMap: this.detail.skinHeight,
+      bumpScale: 0.018,
+      specularIntensity: 0.5,
+      clearcoat: 0.04,
+      clearcoatRoughness: 0.45,
+      side: THREE.DoubleSide,
     });
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 16), bodyMat);
-    foot.scale.set(0.68, 0.09, 0.2);
-    foot.position.y = 0.05;
-    this.snail.add(foot);
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.6, 16), bodyMat);
-    tail.rotation.z = -Math.PI / 2;
-    tail.position.set(0.58, 0.06, 0);
-    this.snail.add(tail);
+    this.snail.add(new THREE.Mesh(snailFootGeometry(), bodyMat));
     const shellMat = new THREE.MeshPhysicalNodeMaterial({
-      map: this.textures.shell,
-      bumpMap: this.textures.shell,
-      bumpScale: 0.032,
-      color: '#baa07d',
-      roughness: 0.45,
-      clearcoat: 0.4,
-      clearcoatRoughness: 0.27,
+      map: this.detail.shellColor,
+      bumpMap: this.detail.shellHeight,
+      bumpScale: 0.011,
+      roughnessMap: this.detail.shellRoughness,
+      color: '#d7c6a5',
+      roughness: 0.92,
+      specularIntensity: 0.32,
+      clearcoat: 0.035,
+      clearcoatRoughness: 0.5,
+      side: THREE.DoubleSide,
     });
-    const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24), shellMat);
-    shell.scale.set(0.38, 0.4, 0.28);
-    shell.position.set(0.07, 0.42, 0);
-    shell.rotation.z = -0.18;
+    const shell = new THREE.Mesh(snailShellGeometry(), shellMat);
+    shell.position.set(0.06, 0.3, -0.035);
     this.snail.add(shell);
-    const spiralPoints: THREE.Vector3[] = [];
-    for (let i = 0; i <= 160; i++) {
-      const t = i / 160,
-        a = t * Math.PI * 4.8,
-        r = 0.016 + t * 0.31;
-      spiralPoints.push(
-        new THREE.Vector3(
-          0.07 + Math.cos(a) * r,
-          0.44 + Math.sin(a) * r,
-          Math.sqrt(Math.max(0.01, 1 - (r / 0.4) ** 2)) * 0.27,
-        ),
-      );
-    }
-    this.snail.add(
-      tube(
-        spiralPoints,
-        0.014,
-        new THREE.MeshPhysicalNodeMaterial({ color: '#5f3f28', roughness: 0.4, clearcoat: 1 }),
-        150,
-      ),
-    );
+    const mantle = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), bodyMat);
+    mantle.position.set(0.02, 0.1, 0);
+    mantle.scale.set(0.31, 0.14, 0.15);
+    this.snail.add(mantle);
     this.snailHead.position.set(-0.47, 0.1, 0);
     this.snail.add(this.snailHead);
     const neck = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 16), bodyMat);
@@ -1261,6 +1305,11 @@ export class Forest {
     this.vegetation.forEach((plant, i) => {
       plant.rotation.z = Math.sin(t * 0.42 + i) * 0.009 * motion;
     });
+    if (
+      this.keyShadow &&
+      (this.frame % 60 === 0 || (t - this.dropStarted < 2 && this.frame % 4 === 0))
+    )
+      this.keyShadow.needsUpdate = true;
     this.updateDrop(t);
     this.updateSnail(t, ease);
     for (let i = 0; i < this.dustData.length; i++) {
@@ -1437,6 +1486,8 @@ export class Forest {
       }
     });
     Object.values(this.textures).forEach((t) => t.dispose());
+    Object.values(this.detail).forEach((t) => t.dispose());
+    Object.values(this.naturalSurfaces.maps).forEach((t) => t.dispose());
     this.renderer.dispose();
   }
 }

@@ -38,18 +38,18 @@ export function makeTextures() {
   const r = random(302);
   const leaf = canvasTexture(1024, (c, s) => {
     const g = c.createLinearGradient(0, 0, s, 0);
-    g.addColorStop(0, '#1b362b');
-    g.addColorStop(0.47, '#45693b');
-    g.addColorStop(0.5, '#78934c');
-    g.addColorStop(0.53, '#496e3c');
-    g.addColorStop(1, '#183e2e');
+    g.addColorStop(0, '#344a27');
+    g.addColorStop(0.47, '#607344');
+    g.addColorStop(0.5, '#84905b');
+    g.addColorStop(0.53, '#59713b');
+    g.addColorStop(1, '#304c2a');
     c.fillStyle = g;
     c.fillRect(0, 0, s, s);
     for (let i = 0; i < 45000; i++) {
       c.fillStyle = r() > 0.5 ? '#c4d16c10' : '#072e2119';
       c.fillRect(r() * s, r() * s, r() * 4 + 1, r() * 6 + 1);
     }
-    c.strokeStyle = '#adc07770';
+    c.strokeStyle = '#b3bc7960';
     c.lineWidth = 3;
     for (let i = -3; i < 19; i++) {
       const y = i * 66;
@@ -77,12 +77,23 @@ export function makeTextures() {
         c.lineWidth = 3;
       }
     }
-    c.strokeStyle = '#c1cd8a';
+    c.strokeStyle = '#a7b273';
     c.lineWidth = 5;
     c.beginPath();
     c.moveTo(512, 0);
     c.lineTo(512, s);
     c.stroke();
+    // Translucent discoloration, tiny lesions and pinholes break the uniform waxy green.
+    for (let i = 0; i < 120; i++) {
+      const x = r() * s,
+        y = r() * s,
+        radius = 3 + r() * 30;
+      const spot = c.createRadialGradient(x, y, 0, x, y, radius);
+      spot.addColorStop(0, i % 3 === 0 ? '#97723b55' : '#c2c0832b');
+      spot.addColorStop(1, '#9c8f5200');
+      c.fillStyle = spot;
+      c.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
   });
   const bark = canvasTexture(1024, (c, s) => {
     c.fillStyle = '#443c33';
@@ -215,10 +226,7 @@ export function makeTextures() {
       const x = r() * s;
       c.fillRect(x, 450, r() * 25 + 4, s);
     }
-    c.fillStyle = '#d3e5ed';
-    c.fillRect(550, 210, 10, 150);
-    c.fillStyle = '#e2d7aa';
-    c.fillRect(150, 430, 60, 25);
+    // No rectangular studio softboxes: the forest reflects a broad, broken sky.
   });
   env.mapping = THREE.EquirectangularReflectionMapping;
   return { leaf, bark, earth, shell, cap, glow, mist, env };
@@ -235,24 +243,33 @@ export function tube(
     material,
   );
 }
-export function leafGeometry(length: number, width: number, curl = 0.35, segments = 28) {
+export function leafGeometry(
+  length: number,
+  width: number,
+  curl = 0.35,
+  segments = 28,
+  columns = 8,
+) {
   const verts: number[] = [],
     uvs: number[] = [],
     indices: number[] = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments,
       w = Math.pow(Math.sin(Math.PI * t), 0.82) * width;
-    for (let j = 0; j <= 8; j++) {
-      const q = j / 4 - 1;
+    for (let j = 0; j <= columns; j++) {
+      const q = j / (columns / 2) - 1;
       verts.push(
-        q * w * (1 + 0.025 * Math.sin(t * 90)),
-        Math.sin(t * Math.PI) * curl - q * q * w * 0.22 - Math.pow(t, 5) * curl * 0.6,
+        q * w * (1 + 0.045 * Math.sin(t * 67 + q * 1.7) + 0.02 * Math.sin(t * 113)),
+        Math.sin(t * Math.PI) * curl -
+          q * q * w * 0.12 -
+          Math.pow(t, 5) * curl * 0.6 +
+          Math.sin(t * 31 + q * 2) * Math.abs(q) * w * 0.045,
         t * length,
       );
-      uvs.push(j / 8, t);
-      if (i < segments && j < 8) {
-        const a = i * 9 + j;
-        indices.push(a, a + 9, a + 1, a + 1, a + 9, a + 10);
+      uvs.push(j / columns, t);
+      if (i < segments && j < columns) {
+        const a = i * (columns + 1) + j;
+        indices.push(a, a + columns + 1, a + 1, a + 1, a + columns + 1, a + columns + 2);
       }
     }
   }
@@ -295,19 +312,117 @@ export function fernGeometry() {
     new THREE.Vector3(0, 1.28, 1.6),
   ]);
   parts.push(new THREE.TubeGeometry(stem, 24, 0.012, 4));
-  for (let i = 1; i < 17; i++) {
-    const t = i / 18,
+  for (let i = 1; i < 19; i++) {
+    const t = i / 20,
       p = stem.getPoint(t),
-      l = Math.sin(t * Math.PI) * 0.65;
+      l = Math.sin(t * Math.PI) * 0.6;
     for (const side of [-1, 1]) {
-      const g = leafGeometry(l, l * 0.16, 0.06, 7);
+      const g = leafGeometry(l * (1 + Math.sin(i * 17 + side) * 0.07), l * 0.13, 0.026, 12);
+      // A pinnate frond has irregular toothed leaflets, not inflated spoon shapes.
+      const positions = g.attributes.position;
+      for (let k = 0; k < positions.count; k++) {
+        const z = positions.getZ(k),
+          x = positions.getX(k);
+        const teeth = 0.75 + 0.25 * Math.abs(Math.sin((z / l) * Math.PI * 11));
+        positions.setX(k, x * teeth);
+      }
+      g.computeVertexNormals();
       g.rotateY(side * 1.08);
-      g.rotateX(-0.25);
-      g.translate(p.x, p.y, p.z);
+      g.rotateX(-0.18 + Math.sin(i * 3.7) * 0.12);
+      g.translate(p.x, p.y + Math.sin(i * 8.1 + side) * 0.015, p.z);
       parts.push(g);
     }
   }
   const result = mergeGeometries(parts);
   parts.forEach((g) => g.dispose());
   return result;
+}
+
+/** Small curled leaves around a leaning moss stem; rounder than triangular grass. */
+export function mossShoot() {
+  const pieces: THREE.BufferGeometry[] = [];
+  for (let ring = 0; ring < 6; ring++)
+    for (let side = 0; side < 5; side++) {
+      const angle = (side / 5) * Math.PI * 2 + ring * 1.1;
+      const length = 0.145 * (1 - ring * 0.09);
+      const leaf = leafGeometry(length, length * 0.13, length * 0.2, 5, 2);
+      leaf.rotateX(-0.35 - ring * 0.05);
+      leaf.rotateY(angle);
+      leaf.translate(Math.sin(ring * 0.4) * 0.035, ring * 0.065, ring * 0.007);
+      pieces.push(leaf);
+    }
+  const geometry = mergeGeometries(pieces);
+  pieces.forEach((g) => g.dispose());
+  return geometry;
+}
+
+/** Expanding whorls form the shell itself, rather than a sphere with a wire spiral. */
+export function snailShellGeometry() {
+  const vertices: number[] = [],
+    uvs: number[] = [],
+    indices: number[] = [];
+  const rings = 240,
+    sides = 30,
+    turns = 14.8,
+    phase = 3.8 - turns;
+  for (let i = 0; i <= rings; i++) {
+    const t = i / rings,
+      theta = t * turns,
+      angle = theta + phase;
+    const radius = 0.012 * Math.exp(theta * 0.198),
+      thickness = radius * 0.72;
+    for (let j = 0; j <= sides; j++) {
+      const phi = (j / sides) * Math.PI * 2;
+      const ridges = 1 + 0.006 * Math.sin(theta * 77) + 0.005 * Math.sin(theta * 129);
+      const radial = radius + Math.cos(phi) * thickness * ridges;
+      vertices.push(
+        Math.cos(angle) * radial,
+        Math.sin(angle) * radial * 1.07,
+        Math.sin(phi) * thickness * 1.12 + 0.17 - radius * 0.44,
+      );
+      uvs.push(t, j / sides);
+      if (i < rings && j < sides) {
+        const a = i * (sides + 1) + j;
+        indices.push(a, a + 1, a + sides + 1, a + 1, a + sides + 2, a + sides + 1);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(indices);
+  g.computeVertexNormals();
+  return g;
+}
+
+export function snailFootGeometry() {
+  const vertices: number[] = [],
+    uvs: number[] = [],
+    indices: number[] = [];
+  const rings = 42,
+    sides = 20;
+  for (let i = 0; i <= rings; i++) {
+    const t = i / rings,
+      width = 0.19 * Math.pow(Math.sin(Math.PI * t), 0.55) * (1.25 - t * 0.55);
+    for (let j = 0; j <= sides; j++) {
+      const phi = (j / sides) * Math.PI,
+        edge = Math.sin(t * 100) * 0.003;
+      vertices.push(
+        -0.62 + t * 1.57,
+        0.016 + Math.sin(phi) * width * 0.57 + edge,
+        Math.cos(phi) * (width + edge),
+      );
+      uvs.push(t, j / sides);
+      if (i < rings && j < sides) {
+        const a = i * (sides + 1) + j;
+        indices.push(a, a + sides + 1, a + 1, a + 1, a + sides + 1, a + sides + 2);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(indices);
+  g.computeVertexNormals();
+  return g;
 }

@@ -6,12 +6,14 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 
 - `npm run build`: passed TypeScript and production compilation.
 - `PREVIEW_URL=http://127.0.0.1:4188 npm test`: **5 passed** (31.5 seconds).
+- Latest full run after the natural-surface pass: `npm test`: **5 passed** (32.7 seconds).
 - After strengthening the mobile width regression assertion and fixing the keyboard light-button state, the mobile and reduced-motion cases passed again: **2 passed** (9.6 seconds).
 - Runtime error listeners found no JavaScript or renderer errors in the successful desktop, mobile and WebGL cases. The unsupported-renderer test intentionally disables both backends and checks the error UI.
 - After the final mushroom-light shader and source formatting, desktop WebGPU and WebGL interaction cases passed again: **2 passed** (22.7 seconds).
 - `npm run format:check` and the final production build passed.
 - Final visual inspection: desktop opening frame, drop impact, snail close-up, narrow portrait, and the forced WebGL path.
 - Asset/font requests remain local. License notices are included in the build.
+- Material pass: local CC0 bark and forest-floor PBR maps, procedural roughness/height detail, PCF shadows, rougher wet surfaces, irregular fronds and mushroom caps, fine curled moss, and an expanding-whorl snail shell were reviewed in desktop, narrow portrait, and close-up views.
 
 ## What the tests exercise
 
@@ -27,6 +29,7 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 - The initial scene camera needed positioning before the first render.
 - An offscreen label could enlarge the mobile layout viewport, shifting the canvas and touch coordinates. A clipped fixed viewport, container-based renderer sizing, and a clamped label fixed this. The test asserts the actual 390 px canvas width.
 - Bark and fern materials were too glossy; roughness, geometry and highlights were refined. Depth of field separates the clearing from the background.
+- The second material pass replaced the remaining uniformly smooth surfaces with scanned bark/ground detail, patchy procedural relief, roughness maps, cached directional shadows, and irregular organic silhouettes.
 - A frond behind the hero droplet gives its refraction visible detail to enlarge/distort.
 - The snail now uses a less obstructed close-up and a properly tapered tail.
 

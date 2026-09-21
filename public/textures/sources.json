@@ -1,0 +1,68 @@
+[
+  {
+    "asset": "bark_brown_02",
+    "channel": "color",
+    "file": "bark_brown_02_color.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_diff_1k.jpg",
+    "md5": "6669cca520594bdca19f94084984ab72",
+    "bytes": 659592,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  },
+  {
+    "asset": "bark_brown_02",
+    "channel": "normal",
+    "file": "bark_brown_02_normal.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_nor_gl_1k.jpg",
+    "md5": "1cad3fe0349a44df2d4d1c2859c79920",
+    "bytes": 1015623,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  },
+  {
+    "asset": "bark_brown_02",
+    "channel": "arm",
+    "file": "bark_brown_02_arm.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_arm_1k.jpg",
+    "md5": "6a566390a8930454c9ad4056273b08fb",
+    "bytes": 232742,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  },
+  {
+    "asset": "forest_leaves_02",
+    "channel": "color",
+    "file": "forest_leaves_02_color.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_diffuse_1k.jpg",
+    "md5": "13e9bfac07cb72ca143e153cc2f589a8",
+    "bytes": 437891,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  },
+  {
+    "asset": "forest_leaves_02",
+    "channel": "normal",
+    "file": "forest_leaves_02_normal.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_nor_gl_1k.jpg",
+    "md5": "72002432222467c74cd9980cbddb25a4",
+    "bytes": 577163,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  },
+  {
+    "asset": "forest_leaves_02",
+    "channel": "arm",
+    "file": "forest_leaves_02_arm.jpg",
+    "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_arm_1k.jpg",
+    "md5": "876b7f364943f65c104c7b3127097596",
+    "bytes": 313980,
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseURL": "https://polyhaven.com/license"
+  }
+]
