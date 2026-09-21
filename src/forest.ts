@@ -80,6 +80,7 @@ export class Forest {
   private heroDrop!: THREE.Mesh;
   private fallingDrop!: THREE.Mesh;
   private runningDrop!: THREE.Mesh;
+  private dripTail!: THREE.Mesh;
   private dripTrail!: THREE.Mesh;
   private dripBeads!: THREE.InstancedMesh;
   private dripProgress = uniform(0);
@@ -828,6 +829,8 @@ export class Forest {
     this.heroDrop = new THREE.Mesh(dropGeo, waterMat);
     this.heroDrop.position.set(0, -0.235, 3.6);
     this.heroDrop.scale.set(0.28, 0.42, 0.28);
+    // The drop is a transient event, so it should never hang from the tip in the idle scene.
+    this.heroDrop.visible = false;
     this.heroLeaf.add(this.heroDrop);
     this.fallingDrop = new THREE.Mesh(dropGeo, waterMat);
     this.fallingDrop.visible = false;
@@ -836,11 +839,23 @@ export class Forest {
     this.runningDrop.scale.set(0.34, 0.46, 0.34);
     this.runningDrop.visible = false;
     this.heroLeaf.add(this.runningDrop);
+    // A low, stretched lobe bridges the bead to the wet leaf while it is moving.
+    this.dripTail = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), waterMat);
+    this.dripTail.visible = false;
+    this.heroLeaf.add(this.dripTail);
     const trailPoints = Array.from({ length: 28 }, (_, i) => {
       const slide = 0.52 + (i / 27) * 0.46;
+      const pathProgress = (slide - 0.46) / 0.5,
+        pathEnvelope = Math.sin(pathProgress * Math.PI),
+        x =
+          0.018 +
+          Math.sin(pathProgress * Math.PI * 3.1 + 0.8) * 0.09 * pathEnvelope +
+          Math.sin(pathProgress * Math.PI * 1.2) * 0.02,
+        halfWidth = Math.max(0.16, Math.pow(Math.sin(slide * Math.PI), 0.82) * 1.03),
+        edgeLift = (x / halfWidth) * (x / halfWidth) * halfWidth * 0.2;
       return new THREE.Vector3(
-        0.025 + Math.sin(i * 1.7) * 0.008,
-        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + 0.038,
+        x,
+        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + edgeLift + 0.038,
         slide * 3.65,
       );
     });
@@ -852,7 +867,7 @@ export class Forest {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x)).mul(0.58);
+    trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x)).mul(0.36);
     this.dripTrail = new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(trailPoints), 26, 0.021, 6, false),
       trailMat,
@@ -864,10 +879,10 @@ export class Forest {
     this.heroLeaf.add(this.dripBeads);
     const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), waterMat, 43);
     for (let i = 0; i < 43; i++) {
-      const t = range(0.1, 0.92),
+      const t = range(0.1, 0.82),
         w = Math.pow(Math.sin(t * Math.PI), 0.82) * 1.03,
         q = range(-0.8, 0.8),
-        s = range(0.016, 0.065);
+        s = range(0.014, 0.048);
       this.dummy.position.set(
         q * w,
         Math.sin(t * Math.PI) * 0.37 - q * q * w * 0.22 - Math.pow(t, 5) * 0.37 * 0.6 + s * 0.52,
@@ -1210,9 +1225,9 @@ export class Forest {
     if (!this.ready || this.elapsed - this.dropStarted < 5.8) return false;
     this.dropStarted = this.elapsed;
     this.impactDone = false;
-    this.heroDrop.visible = true;
-    this.heroDrop.position.y = -0.235;
-    this.heroDrop.scale.set(0.28, 0.42, 0.28);
+    this.heroDrop.visible = false;
+    this.runningDrop.visible = false;
+    this.dripTail.visible = false;
     this.snailFocusUntil = 0;
     return true;
   }
@@ -1523,60 +1538,111 @@ export class Forest {
     this.heroLeaf.rotation.x = 0.18 + Math.sin(t * 0.27) * 0.018 * motion;
     this.heroLeaf.rotation.y = -0.72 + Math.sin(t * 0.19 + 0.7) * 0.018 * motion;
     this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.37) * 0.022 * motion;
+    const slideDuration = 2.45,
+      fallDuration = 0.9,
+      slideStart = 0.46,
+      slideLength = 0.5,
+      surfaceY = (slide: number, x: number) => {
+        const halfWidth = Math.max(0.16, Math.pow(Math.sin(slide * Math.PI), 0.82) * 1.03),
+          edgeLift = (x / halfWidth) * (x / halfWidth) * halfWidth * 0.2;
+        return Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + edgeLift;
+      },
+      pathX = (slide: number, phase: number) => {
+        const pathProgress = THREE.MathUtils.clamp((slide - slideStart) / slideLength, 0, 1),
+          pathEnvelope = Math.sin(pathProgress * Math.PI);
+        return (
+          0.018 +
+          Math.sin(pathProgress * Math.PI * 3.1 + phase * 1.8) * 0.09 * pathEnvelope +
+          Math.sin(pathProgress * Math.PI * 1.2) * 0.02
+        );
+      };
     this.dripProgress.value =
-      age >= 0.18 && age < 1.8 ? THREE.MathUtils.clamp((age - 0.18) / 1.62, 0, 1) : 0;
-    this.dripTrail.visible = age >= 0.18 && age < 1.8;
-    this.dripBeads.visible = age >= 0.28 && age < 1.8;
-    if (age < 1.8) {
-      const progress = THREE.MathUtils.clamp(age / 1.8, 0, 1),
+      age >= 0.12 && age < slideDuration
+        ? THREE.MathUtils.clamp((age - 0.12) / (slideDuration - 0.12), 0, 1)
+        : 0;
+    this.dripTrail.visible = age >= 0.12 && age < slideDuration;
+    this.dripBeads.visible = age >= 0.04 && age < slideDuration;
+    this.dripTail.visible = age >= 0.04 && age < slideDuration;
+    if (age < slideDuration) {
+      const progress = THREE.MathUtils.clamp(age / slideDuration, 0, 1),
         eased = progress * progress * (3 - 2 * progress),
-        slide = 0.52 + eased * 0.46;
-      this.runningDrop.visible = age > 0.32;
-      this.heroDrop.visible = age < 0.34;
-      this.runningDrop.position.set(
-        0.025,
-        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + 0.05,
-        slide * 3.65,
-      );
-      this.runningDrop.rotation.x = 0.18 + Math.sin(progress * Math.PI) * 0.09;
-      this.runningDrop.rotation.z = Math.sin(progress * Math.PI * 2) * 0.05;
+        pathEnvelope = Math.sin(progress * Math.PI),
+        microSlip = Math.sin(progress * Math.PI * 5.2 + t * 1.35) * 0.014 * pathEnvelope,
+        slide = THREE.MathUtils.clamp(
+          slideStart + eased * slideLength + microSlip,
+          slideStart,
+          0.98,
+        ),
+        x = pathX(slide, t),
+        y = surfaceY(slide, x),
+        velocity = 0.48 + 0.52 * Math.sin(progress * Math.PI),
+        birth = THREE.MathUtils.clamp(age / 0.24, 0, 1),
+        birthEase = birth * birth * (3 - 2 * birth),
+        pulse = 1 + Math.sin(t * 7.4 + progress * 5) * 0.06 * velocity;
+      this.runningDrop.visible = birthEase > 0.005;
+      this.heroDrop.visible = false;
+      this.runningDrop.position.set(x, y + 0.045, slide * 3.65);
+      this.runningDrop.rotation.x = 0.14 + Math.sin(progress * Math.PI * 2.4 + t) * 0.08;
+      this.runningDrop.rotation.y = Math.sin(progress * Math.PI * 3 + t * 1.4) * 0.1;
+      this.runningDrop.rotation.z = Math.sin(progress * Math.PI * 2 + t * 1.2) * 0.06;
       this.runningDrop.scale.set(
-        THREE.MathUtils.lerp(0.32, 0.46, eased),
-        THREE.MathUtils.lerp(0.5, 0.9, eased),
-        THREE.MathUtils.lerp(0.32, 0.46, eased),
+        0.32 * pulse * birthEase,
+        0.44 * (1 + velocity * 0.14) * pulse * birthEase,
+        (0.38 + velocity * 0.17) * pulse * birthEase,
+      );
+
+      const tailLength = 0.1 + velocity * 0.16,
+        tailBehind = Math.max(slideStart, slide - tailLength),
+        tailFront = Math.max(tailBehind + 0.012, slide - 0.008),
+        behindX = pathX(tailBehind, t - 0.15),
+        frontX = pathX(tailFront, t),
+        behindY = surfaceY(tailBehind, behindX) + 0.035,
+        frontY = surfaceY(tailFront, frontX) + 0.035,
+        tailSpan = (tailFront - tailBehind) * 3.65;
+      this.dripTail.position.set(
+        (behindX + frontX) * 0.5,
+        (behindY + frontY) * 0.5,
+        (tailBehind + tailFront) * 3.65 * 0.5,
+      );
+      this.dripTail.rotation.set(
+        -Math.atan2(frontY - behindY, tailSpan),
+        Math.sin(progress * Math.PI * 2 + t) * 0.04,
+        Math.sin(progress * Math.PI * 1.4 + t * 0.8) * 0.035,
+      );
+      this.dripTail.scale.set(
+        (0.07 + velocity * 0.024) * birthEase,
+        (0.038 + velocity * 0.016) * birthEase,
+        Math.max(0.02, tailSpan * 0.5),
       );
       for (let i = 0; i < 6; i++) {
         const beadT = i / 5,
-          beadSlide = 0.52 + eased * 0.46 * beadT,
-          beadY = Math.sin(beadSlide * Math.PI) * 0.52 - Math.pow(beadSlide, 5) * 0.52 * 0.6 + 0.04,
-          beadSize = 0.022 * (1 - beadT * 0.22) * (0.8 + 0.2 * Math.sin(t * 3 + i));
-        this.dummy.position.set(0.025 + Math.sin(i * 2.7 + t) * 0.018, beadY, beadSlide * 3.65);
+          beadSlide = THREE.MathUtils.clamp(slide - tailLength * (1 - beadT), slideStart, slide),
+          beadX = pathX(beadSlide, t - (1 - beadT) * 0.35),
+          beadY = surfaceY(beadSlide, beadX) + 0.045,
+          beadSize = (0.012 + beadT * 0.012) * (0.82 + 0.18 * Math.sin(t * 3.2 + i)) * birthEase;
+        this.dummy.position.set(beadX, beadY, beadSlide * 3.65);
         this.dummy.scale.setScalar(beadSize);
         this.dummy.rotation.set(0, 0, 0);
         this.dummy.updateMatrix();
         this.dripBeads.setMatrixAt(i, this.dummy.matrix);
       }
       this.dripBeads.instanceMatrix.needsUpdate = true;
-      this.heroLeaf.rotation.z += Math.sin(progress * Math.PI) * 0.11;
-      this.heroLeaf.rotation.x += Math.sin(progress * Math.PI) * 0.05;
-      this.heroDrop.position.y = THREE.MathUtils.lerp(-0.235, -0.39, eased);
-      this.heroDrop.scale.set(
-        THREE.MathUtils.lerp(0.28, 0.76, eased),
-        THREE.MathUtils.lerp(0.42, 1.12, eased),
-        THREE.MathUtils.lerp(0.28, 0.76, eased),
-      );
-    } else if (age < 2.55) {
-      if (this.heroDrop.visible || this.runningDrop.visible) {
-        const source = this.runningDrop.visible ? this.runningDrop : this.heroDrop;
-        source.getWorldPosition(this.fallingDrop.position);
-        this.heroDrop.visible = false;
+      this.heroLeaf.rotation.z += Math.sin(progress * Math.PI) * 0.08;
+      this.heroLeaf.rotation.x += Math.sin(progress * Math.PI) * 0.035;
+    } else if (age < slideDuration + fallDuration) {
+      if (this.runningDrop.visible) {
+        this.runningDrop.getWorldPosition(this.fallingDrop.position);
         this.runningDrop.visible = false;
+        this.dripTail.visible = false;
+        this.dripBeads.visible = false;
+        this.dripTrail.visible = false;
         this.fallingDrop.visible = true;
         this.fallingDrop.userData.startY = this.fallingDrop.position.y;
       }
-      const f = (age - 1.8) / 0.75;
+      this.heroDrop.visible = false;
+      const f = (age - slideDuration) / fallDuration;
       this.fallingDrop.position.y = this.fallingDrop.userData.startY * (1 - f * f);
-      this.fallingDrop.scale.set(0.78, 1.25, 0.78);
+      this.fallingDrop.scale.set(0.68, 1.02, 0.68);
     } else if (!this.impactDone) {
       this.impactDone = true;
       this.fallingDrop.visible = false;
@@ -1589,16 +1655,7 @@ export class Forest {
       });
       this.events.onDrop();
     }
-    if (age >= 3.0) {
-      this.heroDrop.visible = true;
-      this.heroDrop.position.y = -0.235;
-      const refill = THREE.MathUtils.clamp((age - 3.0) / 2.8, 0, 1);
-      this.heroDrop.scale.set(
-        THREE.MathUtils.lerp(0.22, 0.34, refill),
-        THREE.MathUtils.lerp(0.34, 0.68, refill),
-        THREE.MathUtils.lerp(0.22, 0.34, refill),
-      );
-    }
+    this.heroDrop.visible = false;
     const rippleAge = t - this.rippleTime.value;
     this.rippleRings.forEach((r) => {
       const a = t - r.born - r.delay;
