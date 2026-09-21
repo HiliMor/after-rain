@@ -33,8 +33,9 @@ The browser needs hardware accelerated WebGPU or WebGL 2. The default renderer p
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- |
 | Carry the warm light | Move over the scene; arrow keys also move it   | Touch and drag                                      |
 | Wake the moss        | Move the light, or click the forest floor      | Drag or tap the forest floor                        |
-| Release water        | Click the large leaf or **Let it rain**        | Tap the leaf or **Let it rain**                     |
+| Release the drop     | Click the large leaf or **Release the drop**   | Tap the leaf or **Release the drop**                |
 | Find the snail       | **A quiet neighbour** brings the camera closer | Same button; approaching its shell makes it retract |
+| Look around          | Drag; Shift with the arrow keys does the same  | Two fingers travelling                              |
 | Look closer          | Scroll, or `+` / `-` keys                      | Pinch outward / inward                              |
 | Change angle         | Compass button cycles three camera views       | Same button                                         |
 | Touch the lake       | Click the pool to send rings through the water | Tap the pool                                        |
@@ -69,6 +70,7 @@ Water gathers in the cupped underside of the hero leaf. The leaf sways, the conc
 - Reduced-motion preference disables passive wind, camera parallax, drifting particles, firefly flight, snail travel and tentacle exploration. Explicitly requested water interactions and the snail's response remain available. Scene time pauses while the tab is hidden.
 - Optional ambient sound is synthesized with Web Audio. It is off until a user gesture, and suspends with the hidden tab.
 - Wheel deltas are normalised across `deltaMode`, so one notch means the same on a pixel-reporting browser and a line-reporting one; a single event is capped only against absurd spikes. `+` / `-` give looking closer a keyboard path.
+- Dragging swings the view around what the camera is looking at, so the subject stays centred and only the angle on to it changes. Dragging was free input: on a mouse the light already follows the bare pointer, so a held button can mean something else, and a held button keeps the light still. Touch keeps one finger for the light and uses two travelling fingers, alongside the pinch that was already there. Pitch is clamped short of overhead and never drops the camera to the waterline.
 - Pointer parallax swings the desktop camera around the clearing far enough to read, with the look target following a fraction of the swing so the composition stays anchored while the foreground travels against the distance. Touch viewports keep a fixed frame, since a drag there is already carrying the light.
 - The camera follows its framing directly rather than smoothing an already-smoothed value at half rate, and the parallax offset settles on its own slower curve so a twitchy pointer cannot shake the frame. The push in to the snail stays deliberately slower than ordinary movement, and parallax is kept separate from the pointer used for picking so hit testing stays exact.
 - Controls have accessible names, focus indicators, keyboard equivalents, and a native modal dialog. The decorative canvas is accompanied by a scene description. Renderer initialization failure displays a readable recovery panel.

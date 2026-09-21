@@ -79,7 +79,8 @@ try {
       notes.close();
   });
   if (matchMedia('(pointer: coarse)').matches)
-    $('gesture-hint').innerHTML = 'TOUCH & DRAG TO ILLUMINATE <span>·</span> PINCH TO LOOK CLOSER';
+    $('gesture-hint').innerHTML =
+      'TOUCH & DRAG TO ILLUMINATE <span>·</span> TWO FINGERS TO LOOK AROUND';
   document.addEventListener('visibilitychange', () => {
     void audio.visibility(document.hidden);
   });

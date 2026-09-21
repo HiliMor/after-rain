@@ -134,6 +134,11 @@ export class Forest {
   private gesture = new Map<number, { x: number; y: number }>();
   private pinchDistance = 0;
   private pointerStart = { x: 0, y: 0 };
+  /** Where the visitor has swung the camera to, and where it has eased to so far. */
+  private orbit = { yaw: 0, pitch: 0 };
+  private orbitEased = { yaw: 0, pitch: 0 };
+  private dragOrigin: { x: number; y: number } | null = null;
+  private pinchCentre: { x: number; y: number } | null = null;
   private hover = false;
   private snailHovered = false;
   private visible = true;
@@ -1653,6 +1658,16 @@ export class Forest {
     this.zoom = this.viewIndex === 2 ? 0.48 : this.viewIndex === 1 ? 0.2 : 0;
     return ['The clearing', 'Waterline', 'Leaf study'][this.viewIndex];
   }
+  /**
+   * Swing the view around the clearing. Pitch is clamped well short of overhead and of the
+   * waterline: past either the framing falls apart, and there is nothing worth seeing there.
+   */
+  private swing(dx: number, dy: number) {
+    this.orbit.yaw = THREE.MathUtils.clamp(this.orbit.yaw - dx * 0.0042, -0.85, 0.85);
+    this.orbit.pitch = THREE.MathUtils.clamp(this.orbit.pitch - dy * 0.0028, -0.26, 0.46);
+    this.snailFocusUntil = 0;
+  }
+
   private touchWater(point: THREE.Vector3) {
     this.touchCenter.value.set(point.x, point.z);
     this.touchTime.value = this.elapsed;
@@ -1666,6 +1681,8 @@ export class Forest {
   }
   reset() {
     this.zoom = 0;
+    this.orbit.yaw = 0;
+    this.orbit.pitch = 0;
     this.viewIndex = 0;
     this.snailFocusUntil = 0;
     this.pointer.set(0.2, -0.1);
@@ -1702,10 +1719,25 @@ export class Forest {
           this.gesture.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (this.gesture.size === 2) {
           const [a, b] = [...this.gesture.values()],
-            d = Math.hypot(a.x - b.x, a.y - b.y);
+            d = Math.hypot(a.x - b.x, a.y - b.y),
+            centre = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
           if (this.pinchDistance)
             this.zoom = THREE.MathUtils.clamp(this.zoom + (d - this.pinchDistance) * 0.008, 0, 1.4);
+          // Two fingers spreading zooms, two fingers travelling swings the view. Touch keeps
+          // one finger for the light, which is the interaction the scene is built around.
+          if (this.pinchCentre)
+            this.swing(centre.x - this.pinchCentre.x, centre.y - this.pinchCentre.y);
+          this.pinchCentre = centre;
           this.pinchDistance = d;
+          return;
+        }
+        // A held button means the visitor is looking around, so the light stays put: on a
+        // mouse the light already follows the bare pointer, which leaves dragging free.
+        if (this.dragOrigin && event.pointerType === 'mouse') {
+          this.swing(event.clientX - this.dragOrigin.x, event.clientY - this.dragOrigin.y);
+          this.dragOrigin = { x: event.clientX, y: event.clientY };
+          this.cursor.style.left = `${event.clientX}px`;
+          this.cursor.style.top = `${event.clientY}px`;
           return;
         }
         this.pointer.set(
@@ -1723,6 +1755,7 @@ export class Forest {
       'pointerdown',
       (event) => {
         this.pointerStart = { x: event.clientX, y: event.clientY };
+        this.dragOrigin = { x: event.clientX, y: event.clientY };
         this.gesture.set(event.pointerId, { x: event.clientX, y: event.clientY });
         this.container.setPointerCapture(event.pointerId);
         this.pointer.set(
@@ -1738,7 +1771,11 @@ export class Forest {
       (event) => {
         const wasPinch = this.gesture.size > 1 || this.pinchDistance > 0;
         this.gesture.delete(event.pointerId);
-        if (this.gesture.size === 0) this.pinchDistance = 0;
+        this.dragOrigin = null;
+        if (this.gesture.size === 0) {
+          this.pinchDistance = 0;
+          this.pinchCentre = null;
+        }
         if (
           wasPinch ||
           Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y) > 9
@@ -1764,6 +1801,8 @@ export class Forest {
       'pointercancel',
       (event) => {
         this.gesture.delete(event.pointerId);
+        this.dragOrigin = null;
+        this.pinchCentre = null;
         this.pinchDistance = 0;
       },
       options,
@@ -1826,6 +1865,17 @@ export class Forest {
             0.4,
           );
           this.updatePointer();
+        }
+        if (
+          event.shiftKey &&
+          ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
+        ) {
+          event.preventDefault();
+          this.swing(
+            event.key === 'ArrowLeft' ? -26 : event.key === 'ArrowRight' ? 26 : 0,
+            event.key === 'ArrowUp' ? -26 : event.key === 'ArrowDown' ? 26 : 0,
+          );
+          return;
         }
         // Looking closer had no keyboard path at all: it was wheel or pinch only.
         if (['+', '=', '-', '_'].includes(event.key)) {
@@ -1958,8 +2008,26 @@ export class Forest {
         target.set(2.78, 0.17, 1.5);
       }
     }
+    // Apply the visitor's swing by rotating the framing around what it is looking at, so
+    // the subject stays centred and only the angle on to it changes.
+    this.orbitEased.yaw += (this.orbit.yaw - this.orbitEased.yaw) * glide;
+    this.orbitEased.pitch += (this.orbit.pitch - this.orbitEased.pitch) * glide;
+    if (
+      !focus &&
+      (Math.abs(this.orbitEased.yaw) > 1e-4 || Math.abs(this.orbitEased.pitch) > 1e-4)
+    ) {
+      const offset = cam.clone().sub(target);
+      offset.applyAxisAngle(UP, this.orbitEased.yaw);
+      const right = new THREE.Vector3().crossVectors(UP, offset).normalize();
+      offset.applyAxisAngle(right, this.orbitEased.pitch);
+      // Never let the swing drop the camera to or below the waterline.
+      offset.y = Math.max(offset.y, 0.55);
+      cam.copy(target).add(offset);
+    }
     if (this.frame === 0 || this.reducedMotion.matches) {
       this.parallax.copy(this.pointer);
+      this.orbitEased.yaw = this.orbit.yaw;
+      this.orbitEased.pitch = this.orbit.pitch;
       this.camera.position.copy(cam);
       this.lookAt.copy(target);
     } else {
@@ -2260,6 +2328,7 @@ export class Forest {
       reducedMotion: this.reducedMotion.matches,
       quality: this.quality,
       zoom: this.currentZoom,
+      orbit: [+this.orbitEased.yaw.toFixed(3), +this.orbitEased.pitch.toFixed(3)],
       viewIndex: this.viewIndex,
       touchAge: this.elapsed - this.touchTime.value,
       drawCalls: this.renderer.info.render.drawCalls,

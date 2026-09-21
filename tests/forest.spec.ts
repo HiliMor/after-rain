@@ -39,7 +39,7 @@ test('desktop: light, drop, leaf hit, snail, sound, notes and zoom work without 
   await expect.poll(async () => (await state(page)).viewIndex).toBe(2);
   await page.getByRole('button', { name: 'Reset view' }).click();
   await expect.poll(async () => (await state(page)).viewIndex).toBe(0);
-  await page.getByRole('button', { name: 'Let it rain' }).click();
+  await page.getByRole('button', { name: 'Release the drop' }).click();
   await expect.poll(async () => (await state(page)).dropBusy).toBe(true);
   await expect.poll(async () => (await state(page)).dropVisible).toBe(false);
   await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
@@ -140,7 +140,7 @@ test('WebGL fallback: renders and releases water', async ({ page }) => {
   const errors = captureErrors(page);
   await ready(page, '/?webgl=1');
   expect((await state(page)).backend).toBe('WebGL 2');
-  await page.getByRole('button', { name: 'Let it rain' }).click();
+  await page.getByRole('button', { name: 'Release the drop' }).click();
   await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
   await page.screenshot({ path: 'work/webgl-final.png' });
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -173,6 +173,41 @@ test('reduced motion and keyboard alternatives stay usable', async ({ page }) =>
   await page.locator('#about-button').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('dragging swings the view without moving the light, and reset restores it', async ({
+  page,
+}) => {
+  await ready(page);
+  await page.mouse.move(900, 500);
+  const light = (await state(page)).lightPosition;
+  expect((await state(page)).orbit).toEqual([0, 0]);
+  await page.mouse.down();
+  for (let i = 1; i <= 16; i++) await page.mouse.move(900 - i * 14, 500 - i * 3);
+  await page.mouse.up();
+  await expect.poll(async () => Math.abs((await state(page)).orbit[0])).toBeGreaterThan(0.2);
+  expect((await state(page)).orbit[1]).not.toBe(0);
+  // A held button means looking around, so the carried light stays where it was. It is
+  // still easing toward its target, so allow for that rather than an exact match.
+  const moved = (await state(page)).lightPosition.map((v: number, i: number) =>
+    Math.abs(v - light[i]),
+  );
+  expect(Math.max(...moved)).toBeLessThan(0.05);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => Math.abs((await state(page)).orbit[0])).toBeLessThan(0.02);
+});
+
+test('a click that does not drag still reaches the scene', async ({ page }) => {
+  await ready(page);
+  const leaf = (await state(page)).leafScreen;
+  const box = page.viewportSize()!;
+  const x = ((leaf[0] + 1) / 2) * box.width,
+    y = ((1 - leaf[1]) / 2) * box.height;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect.poll(async () => (await state(page)).dropBusy).toBe(true);
+  expect(Math.abs((await state(page)).orbit[0])).toBeLessThan(0.02);
 });
 
 test('a wheel notch means the same in pixel and line delta modes', async ({ page }) => {
