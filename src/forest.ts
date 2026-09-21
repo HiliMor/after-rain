@@ -16,6 +16,7 @@ import {
   pass,
   reflector,
   screenUV,
+  cameraPosition,
   materialOpacity,
   add,
   nodeObject,
@@ -55,6 +56,11 @@ type Ripple = {
   delay: number;
 };
 const UP = new THREE.Vector3(0, 1, 0);
+// Basin profile shared by the terrain mesh, the water sheet and the shoreline planting.
+const POOL_RADIUS_X = 2.35,
+  POOL_RADIUS_Z = 1.55,
+  POOL_CENTER_Z = 1.1,
+  WATER_LEVEL = -0.027;
 
 export class Forest {
   readonly scene = new THREE.Scene();
@@ -956,32 +962,55 @@ export class Forest {
     water.normalNode = vec3(normalX, float(1), normalZ)
       .normalize()
       .transformDirection(this.camera.matrixWorldInverse);
+    // Reconstruct the basin floor from the same profile the terrain mesh uses, so the
+    // water knows how deep it is at every point instead of being a single flat tone.
+    const bankRise = float(0.2)
+      .add(sin(positionWorld.x.mul(1.7).add(positionWorld.z)).mul(0.16))
+      .add(cos(positionWorld.z.mul(2.7).sub(positionWorld.x)).mul(0.09));
+    const shoreRamp = positionWorld.xz
+      .sub(vec2(0, POOL_CENTER_Z))
+      .div(vec2(POOL_RADIUS_X, POOL_RADIUS_Z))
+      .length();
+    const floorHeight = shoreRamp.sub(0.83).mul(2.3).clamp(0, 1).mul(bankRise).sub(0.185);
+    const depth = float(WATER_LEVEL).sub(floorHeight).max(0);
+    const depthMix = smoothstep(0.012, 0.115, depth);
+    // Grazing angles reflect, steep ones look into the water: the difference is most of
+    // what separates a pool from a sheet of tinted glass.
+    const fresnel = cameraPosition.sub(positionWorld).normalize().y.abs().oneMinus().pow(3.2);
     const shimmer = sin(
       positionWorld.x.mul(5.4).add(positionWorld.z.mul(3.8)).add(this.time.mul(0.32)),
     )
       .mul(0.5)
       .add(0.5);
-    const waterTone = mix(color('#0d2f39'), color('#3d6b65'), shimmer.mul(0.16).add(0.14));
+    const deepTone = mix(color('#06202a'), color('#2d5d5b'), shimmer.mul(0.16).add(0.14)),
+      shallowTone = mix(color('#26362c'), color('#47624b'), shimmer.mul(0.2).add(0.22)),
+      waterTone = mix(shallowTone, deepTone, depthMix);
     const lightThroughWater = exp(distance(positionWorld.xz, this.lightPosition.xz).mul(-1.35)).mul(
         0.26,
       ),
       litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater);
-    water.emissiveNode = color('#4f978a').mul(lightThroughWater.mul(0.18));
+    water.emissiveNode = color('#4f978a').mul(lightThroughWater.mul(depthMix).mul(0.2));
     if (!this.mobile) {
       const reflection = reflector({ resolutionScale: 1, bounces: false });
       reflection.target.rotation.x = -Math.PI / 2;
       reflection.target.position.y = -0.035;
       this.scene.add(reflection.target);
       reflection.uvNode = screenUV.flipX().add(vec2(ripple.mul(0.1).add(still), ripple.mul(0.06)));
-      water.colorNode = mix(litWaterTone, reflection.rgb, 0.38);
+      water.colorNode = mix(litWaterTone, reflection.rgb, fresnel.mul(0.55).add(0.07));
     } else {
       water.colorNode = litWaterTone;
     }
+    // The sheet reaches past the old machined oval and dissolves where it runs thin, so the
+    // shoreline is drawn by the ground contour rather than by the edge of a disc.
+    water.transparent = true;
+    water.opacityNode = smoothstep(0.003, 0.042, depth)
+      .mul(smoothstep(1.21, 1.02, shoreRamp))
+      .mul(fresnel.mul(0.2).add(0.8));
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(geo, water);
-    this.waterMesh.scale.set(2.38, 1, 1.57);
-    this.waterMesh.position.set(0, -0.027, 1.1);
+    this.waterMesh.scale.set(POOL_RADIUS_X * 1.22, 1, POOL_RADIUS_Z * 1.22);
+    this.waterMesh.position.set(0, WATER_LEVEL, POOL_CENTER_Z);
     this.scene.add(this.waterMesh);
     for (let i = 0; i < 6; i++) {
       const mat = new THREE.MeshBasicNodeMaterial({
@@ -1384,7 +1413,9 @@ export class Forest {
         else if (this.raycaster.intersectObject(this.snailHit).length) this.focusSnail();
         else {
           const waterHit = this.raycaster.intersectObject(this.waterMesh).at(0);
-          if (waterHit) this.touchWater(waterHit.point);
+          // The sheet now extends under the bank; only the part that is actually wet responds.
+          if (waterHit && !outsidePool(waterHit.point.x, waterHit.point.z, 1.02))
+            this.touchWater(waterHit.point);
           else {
             this.waveCenter.value.copy(this.targetLight);
             this.waveTime.value = this.elapsed;
