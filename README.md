@@ -48,6 +48,8 @@ Water gathers in the cupped underside of the hero leaf. The leaf sways, the conc
 ## Implementation
 
 - Vite 8, TypeScript, Three.js r186 `WebGPURenderer` and TSL node materials.
+- The hero leaf's relief is drawn from the same vein network as its colour map. The two used to be generated independently - painted beziers in one, straight ridges in the other - so no painted vein had any relief beneath it and the whole network read as lines drawn on paper.
+- Beads resting on the leaf carry their own water rather than the hero drop's, whose thickness is an order above a bead's diameter and made them attenuate as though light crossed a far larger body, coming out milky. Their sizes follow a heavy-tailed spread, many small and a few large, weighted toward the cup and the midrib where rain actually gathers.
 - Seeded procedural geometry, separate linear height/roughness maps, and local CC0 photographic PBR scans for bark and forest litter. Leaf veins, skin cells, shell growth striations, and mushroom fibers are authored procedurally. No stock models or AI-generated image backgrounds.
 - The moss carpet carries no clearcoat: a sharp film on instanced blades that small sparkles into aliasing, and a soft one is invisible at their scale. Dew beads carry the wet read at ground level instead. (An earlier note here blamed frame rate for this; that measurement was wrong - see QA.md.)
 - Dew beads are scattered across the carpet on their own material rather than the drop's, which is fully transmissive and would put a thousand instances through the transmission pass for beads a few pixels across. They are dark bodies with a hard clearcoat glint, since a pale body at this size reads as polystyrene.

@@ -34,6 +34,56 @@ function canvasTexture(
   return map;
 }
 
+/**
+ * The vein network, drawn once so the colour map and the height map can share it. They used
+ * to be generated independently - painted beziers here, straight ridges in the surface maps -
+ * so no painted vein had any relief under it and every one read as a line drawn on paper.
+ */
+function drawLeafVeins(
+  c: CanvasRenderingContext2D,
+  s: number,
+  major: string,
+  minor: string,
+  midrib: string,
+) {
+  c.strokeStyle = major;
+  c.lineWidth = 3;
+  for (let i = -3; i < 19; i++) {
+    const y = i * 66;
+    for (const side of [-1, 1]) {
+      c.strokeStyle = major;
+      c.lineWidth = 3;
+      c.beginPath();
+      c.moveTo(s / 2, y);
+      c.bezierCurveTo(
+        s / 2 + side * 100,
+        y + 20,
+        s / 2 + side * 320,
+        y + 115,
+        s / 2 + side * 520,
+        y + 205,
+      );
+      c.stroke();
+      c.strokeStyle = minor;
+      c.lineWidth = 0.7;
+      for (let k = 1; k < 8; k++) {
+        const x = s / 2 + side * k * 60;
+        const sy = y + k * 21;
+        c.beginPath();
+        c.moveTo(x, sy);
+        c.lineTo(x + side * 70, sy - 35);
+        c.stroke();
+      }
+    }
+  }
+  c.strokeStyle = midrib;
+  c.lineWidth = 5;
+  c.beginPath();
+  c.moveTo(512, 0);
+  c.lineTo(512, s);
+  c.stroke();
+}
+
 export function makeTextures() {
   const r = random(302);
   const leaf = canvasTexture(1024, (c, s) => {
@@ -49,40 +99,7 @@ export function makeTextures() {
       c.fillStyle = r() > 0.5 ? '#c4d16c10' : '#072e2119';
       c.fillRect(r() * s, r() * s, r() * 4 + 1, r() * 6 + 1);
     }
-    c.strokeStyle = '#b3bc7960';
-    c.lineWidth = 3;
-    for (let i = -3; i < 19; i++) {
-      const y = i * 66;
-      for (const side of [-1, 1]) {
-        c.beginPath();
-        c.moveTo(s / 2, y);
-        c.bezierCurveTo(
-          s / 2 + side * 100,
-          y + 20,
-          s / 2 + side * 320,
-          y + 115,
-          s / 2 + side * 520,
-          y + 205,
-        );
-        c.stroke();
-        c.lineWidth = 0.7;
-        for (let k = 1; k < 8; k++) {
-          const x = s / 2 + side * k * 60;
-          const sy = y + k * 21;
-          c.beginPath();
-          c.moveTo(x, sy);
-          c.lineTo(x + side * 70, sy - 35);
-          c.stroke();
-        }
-        c.lineWidth = 3;
-      }
-    }
-    c.strokeStyle = '#a7b273';
-    c.lineWidth = 5;
-    c.beginPath();
-    c.moveTo(512, 0);
-    c.lineTo(512, s);
-    c.stroke();
+    drawLeafVeins(c, s, '#b3bc7960', '#b3bc7960', '#a7b273');
     // Translucent discoloration, tiny lesions and pinholes break the uniform waxy green.
     for (let i = 0; i < 120; i++) {
       const x = r() * s,
@@ -95,6 +112,23 @@ export function makeTextures() {
       c.fillRect(x - radius, y - radius, radius * 2, radius * 2);
     }
   });
+  // Relief for exactly those veins: mid grey lamina, veins raised, blurred so the ridge has
+  // a shoulder rather than a hard step.
+  const leafRelief = canvasTexture(
+    1024,
+    (c, s) => {
+      c.fillStyle = '#6a6a6a';
+      c.fillRect(0, 0, s, s);
+      c.filter = 'blur(2px)';
+      drawLeafVeins(c, s, '#d8d8d8', '#9d9d9d', '#f2f2f2');
+      c.filter = 'none';
+      for (let i = 0; i < 24000; i++) {
+        c.fillStyle = r() > 0.5 ? '#ffffff12' : '#00000012';
+        c.fillRect(r() * s, r() * s, r() * 3 + 1, r() * 3 + 1);
+      }
+    },
+    false,
+  );
   const bark = canvasTexture(1024, (c, s) => {
     c.fillStyle = '#443c33';
     c.fillRect(0, 0, s, s);
@@ -229,7 +263,7 @@ export function makeTextures() {
     // No rectangular studio softboxes: the forest reflects a broad, broken sky.
   });
   env.mapping = THREE.EquirectangularReflectionMapping;
-  return { leaf, bark, earth, shell, cap, glow, mist, env };
+  return { leaf, leafRelief, bark, earth, shell, cap, glow, mist, env };
 }
 
 export function tube(

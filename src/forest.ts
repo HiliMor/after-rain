@@ -965,10 +965,13 @@ export class Forest {
   private buildHero() {
     const mat = new THREE.MeshPhysicalNodeMaterial({
       map: this.textures.leaf,
-      bumpMap: this.detail.leafHeight,
-      bumpScale: 0.032,
+      // Relief drawn from the same vein network as the colour map, so the veins the eye can
+      // see are the ones that catch light. The shared surface map's ridges sit elsewhere.
+      bumpMap: this.textures.leafRelief,
+      bumpScale: 0.055,
       roughnessMap: this.detail.leafRoughness,
-      color: '#d4dcb6',
+      // The old tint washed the painted leaf out to a flat pale sheet.
+      color: '#aebd8c',
       roughness: 0.8,
       specularIntensity: 0.42,
       clearcoat: 0.07,
@@ -1115,12 +1118,32 @@ export class Forest {
     this.dripBeads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), waterMat, 6);
     this.dripBeads.visible = false;
     this.heroLeaf.add(this.dripBeads);
-    const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), waterMat, 43);
+    // The beads used to share the hero drop's water, whose 0.62 thickness is an order above
+    // their own diameter: they attenuated as though light crossed a body far larger than
+    // they are and came out milky. Their own water, thin enough to stay clear and act as
+    // the small lens a bead on a leaf actually is.
+    const beadMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#ffffff',
+      transmission: 1,
+      thickness: 0.14,
+      roughness: 0.02,
+      ior: 1.333,
+      metalness: 0,
+      clearcoat: 0.92,
+      clearcoatRoughness: 0.02,
+      attenuationColor: '#e8f6f2',
+      attenuationDistance: 14,
+      envMapIntensity: 2.1,
+    });
+    const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 14, 10), beadMat, 43);
     for (let i = 0; i < 43; i++) {
       const t = range(0.12, 0.84),
         w = Math.pow(Math.sin(t * Math.PI), 0.82) * 1.03,
-        q = range(-0.84, 0.84),
-        s = range(0.014, 0.046);
+        // Rain on a blade gathers toward the cup and runs along the midrib, so the spread
+        // is weighted inward rather than sprinkled evenly across the whole surface.
+        q = Math.sign(range(-1, 1)) * Math.pow(rand(), 1.5) * 0.86,
+        // Many small beads and a few large ones, rather than one middling size repeated.
+        s = 0.009 + Math.pow(rand(), 2.4) * 0.05;
       // These have to be read off the leaf the scene actually builds. They were being
       // placed on an older, shallower surface with the cup inverted, which left them
       // hanging in the air beside the blade instead of resting in it.
