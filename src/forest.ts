@@ -1193,10 +1193,15 @@ export class Forest {
       .mul(exp(d.sub(age.mul(0.9)).pow(2).mul(-2.1)))
       .mul(exp(age.mul(-0.5)))
       .mul(0.2);
-    const touchRipple = sin(touchDistance.mul(24).sub(touchAge.mul(9.2)))
-      .mul(exp(touchDistance.sub(touchAge.mul(0.95)).pow(2).mul(-2.8)))
-      .mul(exp(touchAge.mul(-0.62)))
-      .mul(0.16);
+    // A fingertip on the surface is not a drop falling into it. This was carrying nearly
+    // the same weight as the impact above and arriving at full strength on the first frame,
+    // so it landed as a shove rather than a touch: a quarter of the amplitude, a tighter
+    // and slower packet with a finer wavelength, and a brief rise instead of an onset.
+    const touchRipple = sin(touchDistance.mul(32).sub(touchAge.mul(9.5)))
+      .mul(exp(touchDistance.sub(touchAge.mul(0.7)).pow(2).mul(-8)))
+      .mul(exp(touchAge.mul(-0.72)))
+      .mul(float(1).sub(exp(touchAge.mul(-14))))
+      .mul(0.095);
     const still = sin(positionWorld.x.mul(7).add(this.time.mul(0.4)))
       .mul(cos(positionWorld.z.mul(9).add(this.time.mul(0.5))))
       .mul(0.005)
