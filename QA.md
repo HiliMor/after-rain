@@ -6,7 +6,7 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 
 - `npm run build`: passed TypeScript and production compilation.
 - `PREVIEW_URL=http://127.0.0.1:4188 npm test`: **5 passed** (31.5 seconds).
-- Latest full run after the drop/snail/water pass: `npm test`: **5 passed** (54.9 seconds).
+- Latest full run after the moving-drop and vegetation pass: `npm test`: **5 passed** (40.4 seconds).
 - After strengthening the mobile width regression assertion and fixing the keyboard light-button state, the mobile and reduced-motion cases passed again: **2 passed** (9.6 seconds).
 - Runtime error listeners found no JavaScript or renderer errors in the successful desktop, mobile and WebGL cases. The unsupported-renderer test intentionally disables both backends and checks the error UI.
 - After the final mushroom-light shader and source formatting, desktop WebGPU and WebGL interaction cases passed again: **2 passed** (22.7 seconds).
@@ -15,6 +15,7 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 - Asset/font requests remain local. License notices are included in the build.
 - Material pass: local CC0 bark and forest-floor PBR maps, procedural roughness/height detail, PCF shadows, rougher wet surfaces, irregular fronds and mushroom caps, fine curled moss, and an expanding-whorl snail shell were reviewed in desktop, narrow portrait, and close-up views.
 - Follow-up visual pass: the cupped hero leaf now sways continuously; its concealed drop grows, slides slowly and falls from the tip. The water has layered low-frequency motion, and the land snail rests on the damp bank rather than the pool surface.
+- Additional polish: the moving drop now leaves a tapered wet track with traveling beads; broad understory leaves, shore reeds, stronger local leaf response, and larger vegetation sway were reviewed in the opening frame.
 
 ## What the tests exercise
 

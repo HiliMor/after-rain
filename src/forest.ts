@@ -80,6 +80,9 @@ export class Forest {
   private heroDrop!: THREE.Mesh;
   private fallingDrop!: THREE.Mesh;
   private runningDrop!: THREE.Mesh;
+  private dripTrail!: THREE.Mesh;
+  private dripBeads!: THREE.InstancedMesh;
+  private dripProgress = uniform(0);
   private dropPosition = new THREE.Vector3();
   private dropStarted = -100;
   private impactDone = true;
@@ -441,6 +444,26 @@ export class Forest {
       side: THREE.DoubleSide,
     });
     const stemMat = new THREE.MeshStandardNodeMaterial({ color: '#4d6b3b', roughness: 0.54 });
+    leafMat.positionNode = positionLocal.add(
+      vec3(
+        sin(this.time.mul(0.42).add(positionLocal.y.mul(2.2)))
+          .mul(positionLocal.y.pow(1.35))
+          .mul(0.035)
+          .mul(this.motion),
+        sin(this.time.mul(0.28).add(positionLocal.z))
+          .mul(positionLocal.y.pow(1.4))
+          .mul(0.008)
+          .mul(this.motion),
+        cos(this.time.mul(0.35).add(positionLocal.x.mul(2)))
+          .mul(positionLocal.y.pow(1.2))
+          .mul(0.018)
+          .mul(this.motion),
+      ),
+    );
+    const leafDistance = distance(positionWorld.xz, this.lightPosition.xz);
+    leafMat.emissiveNode = color('#2b5937').mul(
+      exp(leafDistance.mul(-1.7)).mul(0.08).add(float(0.012)),
+    );
     for (let i = 0; i < 24; i++) {
       const x = range(-7, 7),
         z = range(-5, 0.5);
@@ -472,6 +495,60 @@ export class Forest {
       this.scene.add(group);
       this.vegetation.push(group);
     }
+    // A second understory layer adds broad, wind-responsive leaves between the moss and ferns.
+    const understoryGeo = leafGeometry(0.72, 0.25, 0.24, 18, 7, 0.08);
+    const understoryCount = this.mobile ? 130 : 230;
+    const understory = new THREE.InstancedMesh(understoryGeo, leafMat, understoryCount);
+    for (let i = 0; i < understoryCount; i++) {
+      let x: number, z: number;
+      do {
+        x = range(-7.5, 7.5);
+        z = range(-5.2, 4.8);
+      } while (!outsidePool(x, z, 1.1) || (x > 1.45 && x < 3.9 && z > -1.1 && z < 2.9));
+      const size = range(0.62, 1.25);
+      this.dummy.position.set(x, ground(x, z) + 0.012, z);
+      this.dummy.rotation.set(range(-0.5, 0.25), rand() * Math.PI * 2, range(-0.42, 0.42));
+      this.dummy.scale.set(size * range(0.8, 1.2), size * range(0.75, 1.15), size);
+      this.dummy.updateMatrix();
+      understory.setMatrixAt(i, this.dummy.matrix);
+      understory.setColorAt(
+        i,
+        new THREE.Color().setHSL(range(0.2, 0.34), range(0.32, 0.65), range(0.24, 0.5)),
+      );
+    }
+    this.scene.add(understory);
+    // Reeds break the clean oval shoreline and give the pool a living, layered edge.
+    const reedMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#769968',
+      map: this.textures.leaf,
+      roughness: 0.96,
+      roughnessMap: this.detail.leafRoughness,
+      bumpMap: this.detail.leafHeight,
+      bumpScale: 0.008,
+      specularIntensity: 0.14,
+      clearcoat: 0,
+      side: THREE.DoubleSide,
+    });
+    reedMat.emissiveNode = color('#4c7544').mul(0.12);
+    const reedCount = this.mobile ? 190 : 380;
+    const reeds = new THREE.InstancedMesh(mossBlade(), reedMat, reedCount);
+    for (let i = 0; i < reedCount; i++) {
+      const angle = range(0, Math.PI * 2),
+        ring = range(1.01, 1.11),
+        x = Math.cos(angle) * 2.35 * ring,
+        z = 1.1 + Math.sin(angle) * 1.55 * ring,
+        h = range(0.12, 0.36) * (0.82 + 0.18 * Math.sin(angle * 7));
+      this.dummy.position.set(x, ground(x, z) + 0.008, z);
+      this.dummy.rotation.set(range(-0.22, 0.22), angle + range(-0.6, 0.6), range(-0.35, 0.35));
+      this.dummy.scale.set(h * range(0.55, 1.15), h, h * range(0.65, 1.2));
+      this.dummy.updateMatrix();
+      reeds.setMatrixAt(i, this.dummy.matrix);
+      reeds.setColorAt(
+        i,
+        new THREE.Color().setHSL(range(0.2, 0.32), range(0.35, 0.68), range(0.2, 0.44)),
+      );
+    }
+    this.scene.add(reeds);
     // Delicate seed stalks at the edge of the pool, each with an actual dew bead.
     const dew = new THREE.MeshPhysicalNodeMaterial({
       color: '#e4f9ff',
@@ -759,6 +836,32 @@ export class Forest {
     this.runningDrop.scale.set(0.34, 0.46, 0.34);
     this.runningDrop.visible = false;
     this.heroLeaf.add(this.runningDrop);
+    const trailPoints = Array.from({ length: 28 }, (_, i) => {
+      const slide = 0.52 + (i / 27) * 0.46;
+      return new THREE.Vector3(
+        0.025 + Math.sin(i * 1.7) * 0.008,
+        Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + 0.038,
+        slide * 3.65,
+      );
+    });
+    const trailMat = new THREE.MeshPhysicalNodeMaterial({
+      color: '#74b694',
+      roughness: 0.13,
+      metalness: 0.04,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    trailMat.opacityNode = smoothstep(0.02, 0.16, this.dripProgress.sub(uv().x)).mul(0.58);
+    this.dripTrail = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(trailPoints), 26, 0.021, 6, false),
+      trailMat,
+    );
+    this.dripTrail.visible = false;
+    this.heroLeaf.add(this.dripTrail);
+    this.dripBeads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), waterMat, 6);
+    this.dripBeads.visible = false;
+    this.heroLeaf.add(this.dripBeads);
     const beads = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), waterMat, 43);
     for (let i = 0; i < 43; i++) {
       const t = range(0.1, 0.92),
@@ -1358,7 +1461,8 @@ export class Forest {
     this.guideLight.intensity = 1.1 + Math.sin(t * 2 * motion) * 0.18;
     this.fireflyWing.rotation.z = Math.sin(t * 67 * motion) * 0.5;
     this.vegetation.forEach((plant, i) => {
-      plant.rotation.z = Math.sin(t * 0.42 + i) * 0.009 * motion;
+      plant.rotation.z = Math.sin(t * 0.42 + i) * 0.016 * motion;
+      plant.rotation.x = Math.sin(t * 0.27 + i * 0.7) * 0.006 * motion;
     });
     if (
       this.keyShadow &&
@@ -1419,16 +1523,40 @@ export class Forest {
     this.heroLeaf.rotation.x = 0.18 + Math.sin(t * 0.27) * 0.018 * motion;
     this.heroLeaf.rotation.y = -0.72 + Math.sin(t * 0.19 + 0.7) * 0.018 * motion;
     this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.37) * 0.022 * motion;
+    this.dripProgress.value =
+      age >= 0.18 && age < 1.8 ? THREE.MathUtils.clamp((age - 0.18) / 1.62, 0, 1) : 0;
+    this.dripTrail.visible = age >= 0.18 && age < 1.8;
+    this.dripBeads.visible = age >= 0.28 && age < 1.8;
     if (age < 1.8) {
       const progress = THREE.MathUtils.clamp(age / 1.8, 0, 1),
         eased = progress * progress * (3 - 2 * progress),
         slide = 0.52 + eased * 0.46;
       this.runningDrop.visible = age > 0.32;
+      this.heroDrop.visible = age < 0.34;
       this.runningDrop.position.set(
         0.025,
         Math.sin(slide * Math.PI) * 0.52 - Math.pow(slide, 5) * 0.52 * 0.6 + 0.05,
         slide * 3.65,
       );
+      this.runningDrop.rotation.x = 0.18 + Math.sin(progress * Math.PI) * 0.09;
+      this.runningDrop.rotation.z = Math.sin(progress * Math.PI * 2) * 0.05;
+      this.runningDrop.scale.set(
+        THREE.MathUtils.lerp(0.32, 0.46, eased),
+        THREE.MathUtils.lerp(0.5, 0.9, eased),
+        THREE.MathUtils.lerp(0.32, 0.46, eased),
+      );
+      for (let i = 0; i < 6; i++) {
+        const beadT = i / 5,
+          beadSlide = 0.52 + eased * 0.46 * beadT,
+          beadY = Math.sin(beadSlide * Math.PI) * 0.52 - Math.pow(beadSlide, 5) * 0.52 * 0.6 + 0.04,
+          beadSize = 0.022 * (1 - beadT * 0.22) * (0.8 + 0.2 * Math.sin(t * 3 + i));
+        this.dummy.position.set(0.025 + Math.sin(i * 2.7 + t) * 0.018, beadY, beadSlide * 3.65);
+        this.dummy.scale.setScalar(beadSize);
+        this.dummy.rotation.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        this.dripBeads.setMatrixAt(i, this.dummy.matrix);
+      }
+      this.dripBeads.instanceMatrix.needsUpdate = true;
       this.heroLeaf.rotation.z += Math.sin(progress * Math.PI) * 0.11;
       this.heroLeaf.rotation.x += Math.sin(progress * Math.PI) * 0.05;
       this.heroDrop.position.y = THREE.MathUtils.lerp(-0.235, -0.39, eased);
@@ -1438,10 +1566,11 @@ export class Forest {
         THREE.MathUtils.lerp(0.28, 0.76, eased),
       );
     } else if (age < 2.55) {
-      this.runningDrop.visible = false;
-      if (this.heroDrop.visible) {
-        this.heroDrop.getWorldPosition(this.fallingDrop.position);
+      if (this.heroDrop.visible || this.runningDrop.visible) {
+        const source = this.runningDrop.visible ? this.runningDrop : this.heroDrop;
+        source.getWorldPosition(this.fallingDrop.position);
         this.heroDrop.visible = false;
+        this.runningDrop.visible = false;
         this.fallingDrop.visible = true;
         this.fallingDrop.userData.startY = this.fallingDrop.position.y;
       }
