@@ -690,7 +690,9 @@ export class Forest {
       bumpMap: this.detail.leafHeight,
       bumpScale: 0.008,
       specularIntensity: 0.14,
-      clearcoat: 0,
+      clearcoat: 0.34,
+      clearcoatRoughness: 0.34,
+      clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
     reedMat.emissiveNode = color('#4c7544').mul(0.12);
@@ -1382,7 +1384,9 @@ export class Forest {
       bumpMap: this.detail.skinHeight,
       bumpScale: 0.02,
       specularIntensity: 0.16,
-      clearcoat: 0,
+      clearcoat: 0.36,
+      clearcoatRoughness: 0.32,
+      clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
     const headMat = new THREE.MeshPhysicalNodeMaterial({
@@ -1393,7 +1397,9 @@ export class Forest {
       bumpMap: this.detail.skinHeight,
       bumpScale: 0.022,
       specularIntensity: 0.12,
-      clearcoat: 0,
+      clearcoat: 0.32,
+      clearcoatRoughness: 0.33,
+      clearcoatRoughnessMap: this.detail.skinRoughness,
       side: THREE.DoubleSide,
     });
     const mucusMat = new THREE.MeshStandardNodeMaterial({
@@ -1417,7 +1423,12 @@ export class Forest {
       color: '#a66f3f',
       roughness: 0.98,
       specularIntensity: 0.16,
-      clearcoat: 0,
+      // A shell is naturally glossy and this one has just been rained on, yet it was the
+      // only matte thing left in a wet scene. Same treatment as the foliage: the film goes
+      // in the clearcoat, broken up by the shell's own roughness so it is not a mirror.
+      clearcoat: 0.62,
+      clearcoatRoughness: 0.16,
+      clearcoatRoughnessMap: this.detail.shellRoughness,
       side: THREE.DoubleSide,
     });
     const shell = new THREE.Mesh(snailShellGeometry(), shellMat);
