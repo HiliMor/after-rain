@@ -1,0 +1,30 @@
+{
+  "name": "after-rain",
+  "version": "0.1.0",
+  "description": "An interactive miniature forest after rainfall, seen from insect height on a blue moonlit night. A standalone creative coding and portfolio project, independent from Sk\u00f3gafoss.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "playwright test",
+    "format": "prettier --write --ignore-unknown .",
+    "format:check": "prettier --check --ignore-unknown ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/dm-sans": "^5.3.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/three": "^0.186.0",
+    "prettier": "^3.9.8",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "private": true
+}
