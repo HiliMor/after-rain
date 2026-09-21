@@ -184,6 +184,7 @@ export class Forest {
     this.buildWater();
     this.buildSnail();
     this.buildAtmosphere();
+    this.buildGroundMist();
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
       const material = Array.isArray(object.material) ? object.material[0] : object.material;
@@ -345,8 +346,10 @@ export class Forest {
       bumpScale: 0.006,
       metalness: 0,
       specularIntensity: 0.17,
-      clearcoat: 0.3,
-      clearcoatRoughness: 0.36,
+      // No clearcoat here on purpose. The carpet is 28,000 instanced blades covering most
+      // of the frame, and a second specular lobe across them cost more than half the frame
+      // rate - 29 fps against 60 - for a sparkle that was aliasing anyway.
+      clearcoat: 0,
       // Every instance below is given its own colour, but a colorNode here would replace
       // the diffuse chain and quietly discard all of it, leaving one flat green carpet.
       // The base-to-tip darkening rides in vertex colours instead, so both survive.
@@ -453,11 +456,17 @@ export class Forest {
       // Wet foliage is a rough leaf under a thin film of water, so the gloss belongs in the
       // clearcoat rather than in the substrate. The film is broken up by the leaf's own
       // relief, which keeps it a sheen instead of one blown mirror highlight.
-      clearcoat: 0.44,
-      clearcoatRoughness: 0.3,
+      clearcoatRoughness: 0.32,
       clearcoatRoughnessMap: this.detail.leafRoughness,
       side: THREE.DoubleSide,
     });
+    fernMat.clearcoatNode = sin(uv().x.mul(11.7))
+      .mul(cos(uv().y.mul(8.2).add(0.7)))
+      .mul(0.5)
+      .add(0.5)
+      .pow(1.5)
+      .mul(0.58)
+      .add(0.04);
     fernMat.emissiveNode = this.foliageGlow(1.6);
     const fernGeo = fernGeometry();
     const clusters = [
@@ -510,12 +519,20 @@ export class Forest {
       roughnessMap: this.detail.leafRoughness,
       roughness: 0.88,
       specularIntensity: 0.3,
-      clearcoat: 0.48,
-      clearcoatRoughness: 0.28,
+      clearcoatRoughness: 0.3,
       clearcoatRoughnessMap: this.detail.leafRoughness,
+      vertexColors: true,
       side: THREE.DoubleSide,
     });
-    leafMat.emissiveNode = this.foliageGlow(1.75);
+    // Water on a leaf beads and runs off unevenly. An even film over the whole blade is
+    // what reads as vinyl, so the film itself is patchy, not just its roughness.
+    leafMat.clearcoatNode = sin(uv().x.mul(9.3).add(1.2))
+      .mul(cos(uv().y.mul(6.4)))
+      .mul(0.5)
+      .add(0.5)
+      .pow(1.5)
+      .mul(0.66)
+      .add(0.05);
     const stemMat = new THREE.MeshStandardNodeMaterial({ color: '#4d6b3b', roughness: 0.54 });
     leafMat.positionNode = positionLocal.add(
       vec3(
@@ -534,9 +551,9 @@ export class Forest {
       ),
     );
     const leafDistance = distance(positionWorld.xz, this.lightPosition.xz);
-    leafMat.emissiveNode = color('#2b5937').mul(
-      exp(leafDistance.mul(-1.7)).mul(0.08).add(float(0.012)),
-    );
+    leafMat.emissiveNode = color('#2b5937')
+      .mul(exp(leafDistance.mul(-1.7)).mul(0.08).add(float(0.012)))
+      .add(this.foliageGlow(1.75));
     for (let i = 0; i < 24; i++) {
       const x = range(-7, 7),
         z = range(-5, 0.5);
@@ -556,13 +573,36 @@ export class Forest {
         ),
       );
       for (let j = 0; j < 3; j++) {
-        const leaf = new THREE.Mesh(
-          leafGeometry(range(0.55, 1.3), range(0.18, 0.35), 0.16, 15),
-          leafMat,
+        // Every blade shared one colour and one pitch. Each now ages its own way: some
+        // still deep green, some yellowed and thinning, each hanging at its own angle.
+        const geo = leafGeometry(
+          range(0.55, 1.3),
+          range(0.18, 0.35),
+          range(0.1, 0.32),
+          15,
+          8,
+          range(-0.04, 0.1),
         );
+        const tint = new THREE.Color().setHSL(
+          range(0.19, 0.28),
+          range(0.3, 0.62),
+          range(0.34, 0.72),
+        );
+        const uvs = geo.attributes.uv,
+          shade = new Float32Array(uvs.count * 3);
+        for (let v = 0; v < uvs.count; v++) {
+          // Margins dry and pale first, so they sit lighter than the middle of the blade.
+          const edge = 0.86 + 0.3 * Math.abs(uvs.getX(v) * 2 - 1) ** 2;
+          shade[v * 3] = tint.r * edge;
+          shade[v * 3 + 1] = tint.g * edge;
+          shade[v * 3 + 2] = tint.b * edge;
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(shade, 3));
+        const leaf = new THREE.Mesh(geo, leafMat);
         leaf.position.set(0.1, h * (0.5 + j * 0.2), 0.08);
-        leaf.rotation.y = i + j * 2.3;
-        leaf.rotation.x = 0.05;
+        leaf.rotation.y = i + j * 2.3 + range(-0.5, 0.5);
+        leaf.rotation.x = range(-0.22, 0.3);
+        leaf.rotation.z = range(-0.2, 0.2);
         group.add(leaf);
       }
       this.scene.add(group);
@@ -570,6 +610,18 @@ export class Forest {
     }
     // A second understory layer adds broad, wind-responsive leaves between the moss and ferns.
     const understoryGeo = leafGeometry(0.72, 0.25, 0.24, 18, 7, 0.08);
+    // leafMat reads vertex colours, so this shared geometry needs the margin shading too;
+    // it stays neutral overall and lets each instance's own colour carry the variation.
+    {
+      const uvs = understoryGeo.attributes.uv,
+        shade = new Float32Array(uvs.count * 3);
+      for (let v = 0; v < uvs.count; v++)
+        shade[v * 3] =
+          shade[v * 3 + 1] =
+          shade[v * 3 + 2] =
+            0.88 + 0.28 * Math.abs(uvs.getX(v) * 2 - 1) ** 2;
+      understoryGeo.setAttribute('color', new THREE.BufferAttribute(shade, 3));
+    }
     const understoryCount = this.mobile ? 130 : 230;
     const understory = new THREE.InstancedMesh(understoryGeo, leafMat, understoryCount);
     for (let i = 0; i < understoryCount; i++) {
@@ -1346,6 +1398,71 @@ export class Forest {
     this.snailHit.position.y = 0.28;
     this.snail.add(this.snailHit);
     this.scene.add(this.snail);
+  }
+
+  /**
+   * Mist lying on the wet ground. Stacked horizontal slices rather than a volumetric pass:
+   * the scene is read from above the clearing, so slices are seen near enough face-on to
+   * hold together, and the whole thing costs fill rate and nothing else.
+   */
+  private buildGroundMist() {
+    const mat = new THREE.MeshBasicNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      fog: true,
+    });
+    const p = positionWorld,
+      drift = this.time.mul(this.motion);
+    // Three drifting bands multiplied together break into wisps instead of an even wash.
+    const band = (fx: number, fz: number, sx: number, sz: number, phase: number) =>
+      sin(p.x.mul(fx).add(drift.mul(sx)).add(phase))
+        .mul(cos(p.z.mul(fz).add(drift.mul(sz))))
+        .mul(0.5)
+        .add(0.5);
+    const density = band(0.85, 1.05, 0.07, 0.05, 0)
+      .mul(band(2.4, 1.9, -0.06, 0.09, 1.7))
+      .mul(band(0.42, 0.55, 0.035, -0.045, 3.1))
+      .pow(1.1);
+    const lit = exp(distance(p.xz, this.lightPosition.xz).mul(-0.85));
+    mat.colorNode = mix(color('#5d87a6'), color('#c8a577'), lit.mul(0.85));
+    mat.opacityNode = density
+      // Low-lying, gone by head height.
+      .mul(smoothstep(0.46, -0.08, p.y))
+      // Weighted behind the pool rather than over it. Mist really does gather on water,
+      // but stacked across the basin it washed the one element the eye should land on, so
+      // it sits in the band behind instead, where haze separates the log from the trees.
+      .mul(smoothstep(2.2, -1.6, p.z).mul(0.82).add(0.18))
+      .mul(
+        smoothstep(
+          0.55,
+          1.25,
+          positionWorld.xz
+            .sub(vec2(0, POOL_CENTER_Z))
+            .div(vec2(POOL_RADIUS_X, POOL_RADIUS_Z))
+            .length(),
+        )
+          .mul(0.72)
+          .add(0.28),
+      )
+      // Held to the clearing, and kept off the very front of the lens.
+      .mul(smoothstep(11, 4.5, p.xz.length()))
+      .mul(smoothstep(1.4, 3.2, distance(p, cameraPosition)))
+      .mul(lit.mul(0.7).add(0.55))
+      .mul(3.4);
+    // Each slice is additive over a large part of the frame, so this is all fill rate:
+    // five slices on a 26x26 quad more than halved the frame rate. Three discs cropped to
+    // where the radial fade actually reaches cost a fraction of that for the same look.
+    const slices = this.mobile ? 2 : 3;
+    const disc = new THREE.CircleGeometry(11.4, 40);
+    disc.rotateX(-Math.PI / 2);
+    for (let i = 0; i < slices; i++) {
+      const slice = new THREE.Mesh(disc, mat);
+      slice.position.set(0, -0.05 + (i / slices) * 0.42, 0.4);
+      slice.renderOrder = 3;
+      this.scene.add(slice);
+    }
   }
 
   private buildAtmosphere() {
