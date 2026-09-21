@@ -1025,15 +1025,17 @@ export class Forest {
     const waterMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#f5ffff',
       transmission: 1,
-      thickness: 0.62,
+      // The hero drop is about 0.08 across, so a thickness of 0.62 had light crossing a body
+      // nearly ten times its size and coming out grey. Same mistake the resting beads carried.
+      thickness: 0.1,
       roughness: 0.015,
       ior: 1.333,
       metalness: 0,
-      clearcoat: 1,
-      clearcoatRoughness: 0.01,
-      attenuationColor: '#b3dfde',
-      attenuationDistance: 3,
-      envMapIntensity: 1.3,
+      clearcoat: 0.95,
+      clearcoatRoughness: 0.02,
+      attenuationColor: '#e4f4f1',
+      attenuationDistance: 11,
+      envMapIntensity: 1.9,
     });
     const dropGeo = waterDropGeometry();
     this.heroDrop = new THREE.Mesh(dropGeo, waterMat);
@@ -2162,6 +2164,11 @@ export class Forest {
     this.heroLeaf.rotation.y = -0.72 + Math.sin(t * 0.19 + 0.7) * 0.018 * motion;
     this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.37) * 0.022 * motion;
     const slideDuration = 2.45,
+      // The bead used to switch from sliding to falling in a single frame, and the two
+      // states did not agree: its height tripled and its width halved on that frame. It now
+      // gathers at the tip first, rolls over it and draws out into a pendant, so the shape
+      // the fall begins on is the shape the hang ended on.
+      hangDuration = 0.5,
       fallDuration = 0.72,
       slideStart = 0.46,
       slideLength = 0.5,
@@ -2179,11 +2186,17 @@ export class Forest {
           Math.sin(pathProgress * Math.PI * 1.2) * 0.02
         );
       };
+    const fallStart = slideDuration + hangDuration;
     this.dripProgress.value =
-      age >= 0.12 && age < slideDuration
-        ? THREE.MathUtils.clamp((age - 0.12) / (slideDuration - 0.12), 0, 1)
-        : 0;
-    this.dripTrail.visible = age >= 0.12 && age < slideDuration;
+      age < 0.12
+        ? 0
+        : age < slideDuration
+          ? THREE.MathUtils.clamp((age - 0.12) / (slideDuration - 0.12), 0, 1)
+          : age < fallStart
+            ? 1
+            : // Dries back from the tip once the drop has gone, rather than blinking out.
+              Math.max(0, 1 - (age - fallStart) / (fallDuration * 1.3));
+    this.dripTrail.visible = age >= 0.12 && this.dripProgress.value > 0.002;
     this.dripBeads.visible = age >= 0.04 && age < slideDuration;
     this.dripTail.visible = age >= 0.04 && age < slideDuration;
     if (age < slideDuration) {
@@ -2255,7 +2268,45 @@ export class Forest {
       this.dripBeads.instanceMatrix.needsUpdate = true;
       this.heroLeaf.rotation.z += Math.sin(progress * Math.PI) * 0.08;
       this.heroLeaf.rotation.x += Math.sin(progress * Math.PI) * 0.035;
-    } else if (age < slideDuration + fallDuration) {
+    } else if (age < fallStart) {
+      const h = (age - slideDuration) / hangDuration,
+        ease = h * h * (3 - 2 * h),
+        // The shape the slide finished on, and the one the fall is written to begin on.
+        across0 = 0.098,
+        height0 = 0.044,
+        along0 = 0.108 + 0.48 * 0.03,
+        bead = Math.cbrt(across0 * height0 * along0),
+        // Volume preserving: 0.845^2 * 1.4 is 1. A pendant this shape reads as a drop about
+        // to let go; the 1.85 the fall used to assume made a capsule, not a bead.
+        acrossEnd = bead * 0.845,
+        heightEnd = bead * 1.4,
+        // A neck thins the bead just before it lets go.
+        neck = 1 - Math.pow(Math.max(0, h - 0.7) / 0.3, 2) * 0.12;
+      this.runningDrop.visible = true;
+      this.heroDrop.visible = false;
+      const across = THREE.MathUtils.lerp(across0, acrossEnd, ease) * neck,
+        height = THREE.MathUtils.lerp(height0, heightEnd, ease),
+        along = THREE.MathUtils.lerp(along0, acrossEnd, ease) * neck;
+      this.runningDrop.scale.set(across, height, along);
+      // It has to travel past the end of the blade, not just down. The leaf is read from
+      // above, so a drop lowered beneath the surface goes behind it and disappears; it hangs
+      // in open air off the point instead.
+      const restX = pathX(0.98, t),
+        restY = surfaceY(0.98, restX),
+        tipX = pathX(1, t),
+        tipY = surfaceY(1, tipX);
+      this.runningDrop.position.set(
+        THREE.MathUtils.lerp(restX, tipX, ease),
+        THREE.MathUtils.lerp(restY + height0 * 0.42, tipY - heightEnd * 0.72, ease),
+        THREE.MathUtils.lerp(0.98, 1.014, ease) * 3.65,
+      );
+      // The pendant hangs plumb, so whatever tilt it carried on the blade unwinds.
+      const slope = Math.atan2(tipY - restY, 0.02 * 3.65);
+      this.runningDrop.rotation.set(-slope * (1 - ease), 0, 0);
+      // The blade bends under the weight collecting at its tip.
+      this.heroLeaf.rotation.z += ease * 0.055;
+      this.heroLeaf.rotation.x += ease * 0.022;
+    } else if (age < fallStart + fallDuration) {
       if (this.runningDrop.visible) {
         this.runningDrop.getWorldPosition(this.fallingDrop.position);
         // The bead used to more than double in size the instant it let go. It keeps the
@@ -2271,7 +2322,7 @@ export class Forest {
       this.heroDrop.visible = false;
       // Radius of the sphere holding the same water the bead carried on the leaf.
       const radius = Math.cbrt(this.detachScale.x * this.detachScale.y * this.detachScale.z),
-        f = (age - slideDuration) / fallDuration,
+        f = (age - fallStart) / fallDuration,
         // Fall to where the underside of the bead meets the water, not an arbitrary zero.
         landing = WATER_LEVEL + radius,
         startY = this.fallingDrop.userData.startY as number;
@@ -2279,11 +2330,20 @@ export class Forest {
       // It leaves the leaf still drawn out by the neck it broke from. Surface tension pulls
       // that back within the first moments, then the bead rings between stretched and
       // flattened and settles - that oscillation is what reads as liquid rather than glass.
+      // Start from the exact shape the hang handed over and relax toward a ringing sphere of
+      // the same volume. Re-deriving the shape from a radius left a small step at f = 0,
+      // because the neck that thins the pendant does not thin it evenly on every axis.
       const settle = Math.min(1, f * 4.5),
         ring = Math.sin(f * 31) * 0.17 * Math.exp(-f * 4.2) * motion,
-        stretch = 1 + (1 - settle) * 0.85 + ring,
-        squash = 1 - (1 - settle) * 0.28 - ring * 0.55;
-      this.fallingDrop.scale.set(radius * squash, radius * stretch, radius * squash);
+        wide = THREE.MathUtils.lerp(this.detachScale.x, radius * (1 - ring * 0.55), settle),
+        tall = THREE.MathUtils.lerp(this.detachScale.y, radius * (1 + ring), settle);
+      this.fallingDrop.scale.set(wide, tall, wide);
+      // The blade was bent down by the weight at its tip and snapped straight the instant
+      // the drop left. It now springs back from exactly where the hang left it and rings.
+      const release = Math.exp(-f * 6),
+        recoil = Math.exp(-f * 5.5) * Math.sin(f * 26) * 0.042 * motion;
+      this.heroLeaf.rotation.z += 0.055 * release + recoil;
+      this.heroLeaf.rotation.x += 0.022 * release + recoil * 0.4;
     } else if (!this.impactDone) {
       this.impactDone = true;
       this.fallingDrop.visible = false;
@@ -2346,6 +2406,12 @@ export class Forest {
       dropBusy: this.elapsed - this.dropStarted < 5.8,
       dropVisible: this.heroDrop.visible,
       dropFalling: this.fallingDrop.visible,
+      dropSliding: this.runningDrop.visible,
+      dropSlideScale: this.runningDrop.scale.toArray().map((v) => +v.toFixed(4)),
+      dropSlideScreen: this.runningDrop
+        .getWorldPosition(new THREE.Vector3())
+        .project(this.camera)
+        .toArray(),
       dropFallPosition: this.fallingDrop.position.toArray().map((v) => +v.toFixed(3)),
       rippleAge: this.elapsed - this.rippleTime.value,
       snailRetraction: this.snailRetraction,
