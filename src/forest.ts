@@ -124,6 +124,8 @@ export class Forest {
   private zoom = 0;
   /** Eased pointer offset for camera parallax. `pointer` itself stays exact for picking. */
   private parallax = new THREE.Vector2(0.2, -0.1);
+  /** Size the bead had on the leaf, carried across the moment it lets go. */
+  private detachScale = new THREE.Vector3(0.32, 0.47, 0.46);
   private currentZoom = 0;
   private viewIndex = 0;
   private gesture = new Map<number, { x: number; y: number }>();
@@ -899,7 +901,10 @@ export class Forest {
     // The drop is a transient event, so it should never hang from the tip in the idle scene.
     this.heroDrop.visible = false;
     this.heroLeaf.add(this.heroDrop);
-    this.fallingDrop = new THREE.Mesh(dropGeo, waterMat);
+    // Once it is off the leaf it is no longer a pendant. The clinging shape has its neck
+    // and point built into the lathe, which no amount of squashing hides, so the falling
+    // bead is a sphere of the same volume, shaped entirely by how it is scaled.
+    this.fallingDrop = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), waterMat);
     this.fallingDrop.visible = false;
     this.scene.add(this.fallingDrop);
     this.runningDrop = new THREE.Mesh(waterDropGeometry(), waterMat);
@@ -1800,7 +1805,7 @@ export class Forest {
     this.heroLeaf.rotation.y = -0.72 + Math.sin(t * 0.19 + 0.7) * 0.018 * motion;
     this.heroLeaf.rotation.z = -0.08 + Math.sin(t * 0.37) * 0.022 * motion;
     const slideDuration = 2.45,
-      fallDuration = 0.9,
+      fallDuration = 0.72,
       slideStart = 0.46,
       slideLength = 0.5,
       surfaceY = (slide: number, x: number) => {
@@ -1895,6 +1900,9 @@ export class Forest {
     } else if (age < slideDuration + fallDuration) {
       if (this.runningDrop.visible) {
         this.runningDrop.getWorldPosition(this.fallingDrop.position);
+        // The bead used to more than double in size the instant it let go. It keeps the
+        // size it had on the leaf instead.
+        this.runningDrop.getWorldScale(this.detachScale);
         this.runningDrop.visible = false;
         this.dripTail.visible = false;
         this.dripBeads.visible = false;
@@ -1903,9 +1911,21 @@ export class Forest {
         this.fallingDrop.userData.startY = this.fallingDrop.position.y;
       }
       this.heroDrop.visible = false;
-      const f = (age - slideDuration) / fallDuration;
-      this.fallingDrop.position.y = this.fallingDrop.userData.startY * (1 - f * f);
-      this.fallingDrop.scale.set(0.68, 1.02, 0.68);
+      // Radius of the sphere holding the same water the pendant did on the leaf.
+      const radius = this.detachScale.x * 0.2,
+        f = (age - slideDuration) / fallDuration,
+        // Fall to where the underside of the bead meets the water, not an arbitrary zero.
+        landing = WATER_LEVEL + radius,
+        startY = this.fallingDrop.userData.startY as number;
+      this.fallingDrop.position.y = startY + (landing - startY) * f * f;
+      // It leaves the leaf still drawn out by the neck it broke from. Surface tension pulls
+      // that back within the first moments, then the bead rings between stretched and
+      // flattened and settles - that oscillation is what reads as liquid rather than glass.
+      const settle = Math.min(1, f * 4.5),
+        ring = Math.sin(f * 31) * 0.17 * Math.exp(-f * 4.2) * motion,
+        stretch = 1 + (1 - settle) * 0.85 + ring,
+        squash = 1 - (1 - settle) * 0.28 - ring * 0.55;
+      this.fallingDrop.scale.set(radius * squash, radius * stretch, radius * squash);
     } else if (!this.impactDone) {
       this.impactDone = true;
       this.fallingDrop.visible = false;
@@ -1990,6 +2010,8 @@ export class Forest {
       frames: this.frame,
       dropBusy: this.elapsed - this.dropStarted < 5.8,
       dropVisible: this.heroDrop.visible,
+      dropFalling: this.fallingDrop.visible,
+      dropFallPosition: this.fallingDrop.position.toArray().map((v) => +v.toFixed(3)),
       rippleAge: this.elapsed - this.rippleTime.value,
       snailRetraction: this.snailRetraction,
       snailDiscovered: this.snailDiscovered,
