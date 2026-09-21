@@ -680,7 +680,10 @@ export class Forest {
       color: '#efdbc3',
       roughness: 0.96,
       specularIntensity: 0.27,
-      clearcoat: 0,
+      // Caps are still tacky after the rain rather than chalk dry.
+      clearcoat: 0.13,
+      clearcoatRoughness: 0.55,
+      vertexColors: true,
       side: THREE.DoubleSide,
     });
     const stemMat = new THREE.MeshStandardNodeMaterial({
@@ -716,39 +719,56 @@ export class Forest {
       group.position.set(x, ground(x, z), z);
       group.rotation.z = range(-0.14, 0.14);
       group.scale.setScalar(size);
+      // One shared profile made eight copies of a single mushroom at different scales.
+      // Age each one instead: young caps stay domed and tucked, older ones broaden and
+      // lift their margin, and each stem leans its own way under its own crown.
+      const spread = range(0.84, 1.26),
+        rise = range(0.76, 1.32),
+        flare = range(-0.02, 0.1),
+        leanX = range(-0.11, 0.11),
+        leanZ = range(-0.09, 0.09),
+        rim = 0.57 * spread,
+        capBase = 1.03;
       group.add(
         tube(
           [
             new THREE.Vector3(),
-            new THREE.Vector3(-0.08, 0.55, 0.02),
-            new THREE.Vector3(0.03, 1.05, 0),
+            new THREE.Vector3(leanX * 0.55 - 0.05, 0.55, leanZ * 0.55 + 0.02),
+            new THREE.Vector3(leanX, 1.05, leanZ),
           ],
-          0.075,
+          0.075 * range(0.8, 1.2) * (0.62 + spread * 0.38),
           stemMat,
           16,
         ),
       );
       const profile = [
-        new THREE.Vector2(0, 1.36),
-        new THREE.Vector2(0.12, 1.37),
-        new THREE.Vector2(0.25, 1.32),
-        new THREE.Vector2(0.42, 1.21),
-        new THREE.Vector2(0.55, 1.075),
-        new THREE.Vector2(0.57, 1.03),
-        new THREE.Vector2(0.49, 1.01),
-        new THREE.Vector2(0.1, 1.025),
+        new THREE.Vector2(0, capBase + 0.33 * rise),
+        new THREE.Vector2(0.12 * spread, capBase + 0.34 * rise),
+        new THREE.Vector2(0.25 * spread, capBase + 0.29 * rise),
+        new THREE.Vector2(0.42 * spread, capBase + 0.18 * rise),
+        new THREE.Vector2(0.55 * spread, capBase + 0.045 * rise + flare),
+        new THREE.Vector2(rim, capBase + flare),
+        new THREE.Vector2(0.49 * spread, capBase - 0.02),
+        new THREE.Vector2(0.1 * spread, capBase - 0.005),
       ];
       const capGeometry = new THREE.LatheGeometry(new THREE.SplineCurve(profile).getPoints(36), 72);
       const points = capGeometry.attributes.position,
         coords = capGeometry.attributes.uv;
       const variation = x * 13 + z * 7;
+      // Pigment sits heaviest over the centre of a cap and thins toward the margin.
+      const tint = new THREE.Color().setHSL(
+          range(0.05, 0.11),
+          range(0.12, 0.33),
+          range(0.68, 0.95),
+        ),
+        shade = new Float32Array(points.count * 3);
       for (let i = 0; i < points.count; i++) {
         const px = points.getX(i),
           py = points.getY(i),
           pz = points.getZ(i),
           a = Math.atan2(px, pz),
           radius = Math.hypot(px, pz),
-          edge = radius / 0.57;
+          edge = radius / rim;
         const wobble =
           1 + Math.sin(a * 5 + variation) * 0.035 + Math.cos(a * 9 - variation) * 0.016;
         points.setXYZ(
@@ -758,18 +778,34 @@ export class Forest {
           pz * wobble,
         );
         coords.setXY(i, (a + Math.PI) / (Math.PI * 2), edge);
+        const pigment = 0.7 + 0.36 * Math.min(1, edge) ** 0.8;
+        shade[i * 3] = tint.r * pigment;
+        shade[i * 3 + 1] = tint.g * pigment;
+        shade[i * 3 + 2] = tint.b * pigment;
       }
+      capGeometry.setAttribute('color', new THREE.BufferAttribute(shade, 3));
       capGeometry.computeVertexNormals();
-      const cap = new THREE.Mesh(capGeometry, capMat);
-      group.add(cap);
+      // Cap and gills ride the stem top together, tilted off true like a real crown.
+      const crown = new THREE.Group();
+      crown.position.set(leanX, 0, leanZ);
+      crown.rotation.set(range(-0.1, 0.1), rand() * 6, range(-0.1, 0.1));
+      crown.add(new THREE.Mesh(capGeometry, capMat));
       const gills: THREE.BufferGeometry[] = [];
       for (let i = 0; i < 36; i++) {
         const a = (i / 36) * Math.PI * 2;
         gills.push(
           tube(
             [
-              new THREE.Vector3(Math.cos(a) * 0.1, 1.02, Math.sin(a) * 0.1),
-              new THREE.Vector3(Math.cos(a) * 0.49, 1.014, Math.sin(a) * 0.49),
+              new THREE.Vector3(
+                Math.cos(a) * 0.1 * spread,
+                capBase - 0.01,
+                Math.sin(a) * 0.1 * spread,
+              ),
+              new THREE.Vector3(
+                Math.cos(a) * 0.49 * spread,
+                capBase - 0.016 + flare * 0.8,
+                Math.sin(a) * 0.49 * spread,
+              ),
             ],
             0.007,
             gillMat,
@@ -777,8 +813,9 @@ export class Forest {
           ).geometry,
         );
       }
-      group.add(new THREE.Mesh(mergeGeometries(gills), gillMat));
+      crown.add(new THREE.Mesh(mergeGeometries(gills), gillMat));
       gills.forEach((g) => g.dispose());
+      group.add(crown);
       this.scene.add(group);
     }
   }
