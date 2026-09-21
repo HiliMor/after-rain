@@ -14,7 +14,7 @@ export function loadNaturalSurfaces() {
       }),
     );
     const map = loader.load(
-      `/textures/${asset}_${channel}.jpg`,
+      `${import.meta.env.BASE_URL}textures/${asset}_${channel}.jpg`,
       () => resolve(),
       undefined,
       reject,

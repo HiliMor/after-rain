@@ -2,7 +2,9 @@
 
 A small, interactive forest after the rain. A standalone Three.js scene with a wet canopy leaf, a refracting droplet, a shallow pool, procedural moss and ferns, a warm firefly, and a shy snail.
 
-**Canonical code root:** `/Users/hilimor/Documents/after-rain`. This is an independent local Git repository. It does not depend on or change Skógafoss.
+**Live:** https://hilimor.github.io/after-rain/ — deployed from `main` by GitHub Actions.
+
+**Canonical code root:** `/Users/hilimor/Documents/after-rain`, mirrored to `HiliMor/after-rain`. Independent of Skógafoss: it neither depends on nor changes that project.
 
 ## Run locally
 
@@ -103,6 +105,6 @@ The first version was visually inspected at 1512×982, 1280×800, and 390×844 i
 
 The scene remains an authored, stylized environment even after the material realism pass. It now uses photographic bark/ground detail, caps that differ in maturity rather than in scale alone, irregular leaf edges, fine curled moss, an expanding-whorl snail shell and cellular skin relief. The snail still uses joint/scale animation rather than an anatomical skin rig. The drop and waves are authored animations and shaders, not a fluid simulation. Directional shadows are cached at a limited update rate; there is no full contact-occlusion solution or volumetric scattering. Atmospheric shafts are soft translucent geometry. Actual iOS/Safari/Android hardware still needs verification before a public release. Audio controls were functionally checked; no studio listening/mixing pass is claimed.
 
-The source is private/unlicensed unless the owner chooses a distribution license. See `CREDITS.md` for third-party licensing.
+The repository is public so the work can be read and the site can be published, but that is not a grant of rights: the source is all rights reserved, as `LICENSE` states, and `package.json` is marked `UNLICENSED`. Opening it up for reuse would be a deliberate change of licence, not an oversight to correct. See `CREDITS.md` for third-party licensing, which is unaffected.
 
 Implementation references: [Three.js WebGPU guide](https://threejs.org/manual/pages/webgpurenderer.html), [node post-processing](https://threejs.org/manual/pages/webgpu-postprocessing.html), [TSL documentation](https://threejs.org/docs/pages/TSL.html).

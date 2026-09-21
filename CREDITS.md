@@ -10,7 +10,7 @@ All forest geometry, animated behaviors, procedural texture canvases, interface 
 
 Vite (MIT), TypeScript (Apache-2.0), Playwright (Apache-2.0), Prettier (MIT), and Three.js typings (MIT) are development tools. Their license files remain in the installed packages. Exact versions are recorded in `package-lock.json`.
 
-License notices under `public/licenses/` are copied into every production build. Original project source is `UNLICENSED` (private); third-party notices do not license the original project.
+License notices under `public/licenses/` are copied into every production build. The original project source is `UNLICENSED` — all rights reserved, see `LICENSE` — and is public to be read, not reused; third-party notices do not license the original project.
 
 ## Photographic PBR surfaces
 
