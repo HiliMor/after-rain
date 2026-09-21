@@ -36,11 +36,13 @@ The browser needs hardware accelerated WebGPU or WebGL 2. The default renderer p
 | Release water        | Click the large leaf or **Let it rain**        | Tap the leaf or **Let it rain**                     |
 | Find the snail       | **A quiet neighbour** brings the camera closer | Same button; approaching its shell makes it retract |
 | Look closer          | Scroll down; scroll up to pull back            | Pinch outward / inward                              |
+| Change angle         | Compass button cycles three camera views       | Same button                                         |
+| Touch the lake       | Click the pool to send rings through the water | Tap the pool                                        |
 | Return home          | **Reset view** or Escape                       | **Reset view**                                      |
 | Sound                | Optional sound button, initially off           | Same                                                |
 | Instructions         | **Field notes**, Escape to close               | **Field notes**, close button                       |
 
-Water gathers in the cupped underside of the hero leaf. The leaf sways, the concealed bead pulls free and crawls slowly toward the tip before falling, creating ripples and splash beads. A new bead reforms inside the leaf. The land snail stays on the damp bank beside the pool, gradually emerges, explores with separate tentacles, and retracts when the pointer/light approaches. It extends again when given space. The close-up returns after 12 seconds or immediately with Reset view.
+Water gathers in the cupped underside of the hero leaf. The leaf sways, the concealed bead pulls free and crawls slowly toward the tip before falling, creating ripples and splash beads. Clicking or tapping the pool sends a second set of travelling rings through the water and nudges the floating leaf. The land snail stays on the damp bank beside the pool, gradually emerges, explores with separate tentacles, and retracts when the pointer/light approaches. It extends again when given space. The close-up returns after 12 seconds or immediately with Reset view.
 
 ## Implementation
 
@@ -49,6 +51,7 @@ Water gathers in the cupped underside of the hero leaf. The leaf sways, the conc
 - Instanced vegetation: 28,000 curved blades and 2,800 fine-leaved moss shoots on desktop; fewer blades on narrow screens. Shared fern geometry, merged mushroom gills, and instanced ground detail keep draw counts bounded.
 - A second broad-leaf understory layer and a softer ring of water-edge reeds add species variation around the clearing; leaf materials carry local wind deformation and nearby-light response.
 - Physical transmission with water's IOR (1.333), reflective wet surfaces, environment lighting, TSL moss light propagation, layered water normals, and restrained bloom. A pale frond behind the drop makes its refraction visible.
+- The pool combines reflection, low transmission, light-driven green shimmer and touch ripples; a compass control cycles the wide clearing, waterline and leaf-study camera angles.
 - Desktop uses planar pool reflections and depth of field. Narrow screens use environment reflections and no depth of field. The reflector uses the main viewport's resolution: a reduced-size reflector interacting with r186 transmission produced WebGPU validation errors during development, so that combination is intentionally avoided.
 - Narrow screens use fewer moss instances and no depth of field. Scene framing responds to viewport changes; the initial quality tier remains in place until reload. DPR is capped, and slow rendering can trigger one further resolution reduction after warm-up.
 - Materials use patchy roughness and restrained specular response, with the strongest highlights reserved for water. Directional PCF shadows anchor objects; they are cached and refreshed periodically or during a drop. The reflective pool does not cast into its own shadow pass.
@@ -76,6 +79,6 @@ The first version was visually inspected at 1512×982, 1280×800, and 390×844 i
 
 The scene remains an authored, stylized environment even after the material realism pass. It now uses photographic bark/ground detail, irregular caps and leaf edges, fine curled moss, an expanding-whorl snail shell and cellular skin relief. The snail still uses joint/scale animation rather than an anatomical skin rig. The drop and waves are authored animations and shaders, not a fluid simulation. Directional shadows are cached at a limited update rate; there is no full contact-occlusion solution or volumetric scattering. Atmospheric shafts are soft translucent geometry. Actual iOS/Safari/Android hardware still needs verification before a public release. Audio controls were functionally checked; no studio listening/mixing pass is claimed.
 
-No GitHub remote or public deployment has been created. The source is private/unlicensed unless the owner chooses a distribution license. See `CREDITS.md` for third-party licensing.
+The source is private/unlicensed unless the owner chooses a distribution license. See `CREDITS.md` for third-party licensing.
 
 Implementation references: [Three.js WebGPU guide](https://threejs.org/manual/pages/webgpurenderer.html), [node post-processing](https://threejs.org/manual/pages/webgpu-postprocessing.html), [TSL documentation](https://threejs.org/docs/pages/TSL.html).

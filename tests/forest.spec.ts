@@ -30,6 +30,15 @@ test('desktop: light, drop, leaf hit, snail, sound, notes and zoom work without 
   const before = (await state(page)).lightPosition;
   await page.mouse.move(950, 700);
   await expect.poll(async () => (await state(page)).lightPosition).not.toEqual(before);
+  const water = await point(page, 'waterScreen');
+  await page.mouse.click(water.x, water.y);
+  await expect.poll(async () => (await state(page)).touchAge).toBeLessThan(1);
+  await page.getByRole('button', { name: 'Change camera view' }).click();
+  await expect.poll(async () => (await state(page)).viewIndex).toBe(1);
+  await page.getByRole('button', { name: 'Change camera view' }).click();
+  await expect.poll(async () => (await state(page)).viewIndex).toBe(2);
+  await page.getByRole('button', { name: 'Reset view' }).click();
+  await expect.poll(async () => (await state(page)).viewIndex).toBe(0);
   await page.getByRole('button', { name: 'Let it rain' }).click();
   await expect.poll(async () => (await state(page)).dropBusy).toBe(true);
   await expect.poll(async () => (await state(page)).dropVisible).toBe(false);

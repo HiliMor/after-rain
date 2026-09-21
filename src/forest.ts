@@ -71,6 +71,8 @@ export class Forest {
   readonly waveTime = uniform(-50);
   readonly rippleCenter = uniform(new THREE.Vector2(1, 1));
   readonly rippleTime = uniform(-50);
+  readonly touchCenter = uniform(new THREE.Vector2(0, 1));
+  readonly touchTime = uniform(-50);
   readonly motion = uniform(1);
   readonly focusDistance = uniform(7.8);
   private pipeline!: THREE.RenderPipeline;
@@ -88,7 +90,9 @@ export class Forest {
   private dropStarted = -100;
   private impactDone = true;
   private rippleRings: Ripple[] = [];
+  private touchRings: Ripple[] = [];
   private splash: THREE.Mesh[] = [];
+  private waterMesh!: THREE.Mesh;
   private floatingLeaf!: THREE.Group;
   private snail = new THREE.Group();
   private snailHead = new THREE.Group();
@@ -113,6 +117,7 @@ export class Forest {
   private elapsed = 0;
   private zoom = 0;
   private currentZoom = 0;
+  private viewIndex = 0;
   private gesture = new Map<number, { x: number; y: number }>();
   private pinchDistance = 0;
   private pointerStart = { x: 0, y: 0 };
@@ -907,15 +912,27 @@ export class Forest {
       roughness: 0.24,
       clearcoat: 0.58,
       clearcoatRoughness: 0.16,
+      transmission: 0.2,
+      thickness: 0.22,
+      ior: 1.333,
+      attenuationColor: '#1d5b61',
+      attenuationDistance: 2.8,
+      specularIntensity: 0.62,
       side: THREE.DoubleSide,
     });
     water.name = 'pool-water';
     const d = distance(positionWorld.xz, this.rippleCenter),
-      age = this.time.sub(this.rippleTime);
+      age = this.time.sub(this.rippleTime),
+      touchDistance = distance(positionWorld.xz, this.touchCenter),
+      touchAge = this.time.sub(this.touchTime);
     const ripple = sin(d.mul(22).sub(age.mul(9)))
       .mul(exp(d.sub(age.mul(0.9)).pow(2).mul(-3)))
       .mul(exp(age.mul(-0.6)))
       .mul(0.07);
+    const touchRipple = sin(touchDistance.mul(28).sub(touchAge.mul(10)))
+      .mul(exp(touchDistance.sub(touchAge.mul(0.95)).pow(2).mul(-5)))
+      .mul(exp(touchAge.mul(-0.8)))
+      .mul(0.055);
     const still = sin(positionWorld.x.mul(7).add(this.time.mul(0.4)))
       .mul(cos(positionWorld.z.mul(9).add(this.time.mul(0.5))))
       .mul(0.005)
@@ -929,8 +946,13 @@ export class Forest {
     )
       .mul(0.004)
       .mul(this.motion);
-    const normalX = ripple.add(still).add(swell).add(crossWave),
-      normalZ = ripple.mul(0.72).add(still.mul(0.8)).add(swell.mul(0.75)).sub(crossWave);
+    const normalX = ripple.add(touchRipple).add(still).add(swell).add(crossWave),
+      normalZ = ripple
+        .mul(0.72)
+        .add(touchRipple.mul(0.78))
+        .add(still.mul(0.8))
+        .add(swell.mul(0.75))
+        .sub(crossWave);
     water.normalNode = vec3(normalX, float(1), normalZ)
       .normalize()
       .transformDirection(this.camera.matrixWorldInverse);
@@ -940,22 +962,27 @@ export class Forest {
       .mul(0.5)
       .add(0.5);
     const waterTone = mix(color('#0d2f39'), color('#3d6b65'), shimmer.mul(0.16).add(0.14));
+    const lightThroughWater = exp(distance(positionWorld.xz, this.lightPosition.xz).mul(-1.35)).mul(
+        0.26,
+      ),
+      litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater);
+    water.emissiveNode = color('#4f978a').mul(lightThroughWater.mul(0.18));
     if (!this.mobile) {
       const reflection = reflector({ resolutionScale: 1, bounces: false });
       reflection.target.rotation.x = -Math.PI / 2;
       reflection.target.position.y = -0.035;
       this.scene.add(reflection.target);
       reflection.uvNode = screenUV.flipX().add(vec2(ripple.mul(0.1).add(still), ripple.mul(0.06)));
-      water.colorNode = mix(waterTone, reflection.rgb, 0.38);
+      water.colorNode = mix(litWaterTone, reflection.rgb, 0.38);
     } else {
-      water.colorNode = waterTone;
+      water.colorNode = litWaterTone;
     }
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
-    const waterMesh = new THREE.Mesh(geo, water);
-    waterMesh.scale.set(2.38, 1, 1.57);
-    waterMesh.position.set(0, -0.027, 1.1);
-    this.scene.add(waterMesh);
+    this.waterMesh = new THREE.Mesh(geo, water);
+    this.waterMesh.scale.set(2.38, 1, 1.57);
+    this.waterMesh.position.set(0, -0.027, 1.1);
+    this.scene.add(this.waterMesh);
     for (let i = 0; i < 6; i++) {
       const mat = new THREE.MeshBasicNodeMaterial({
         color: '#b4dfe1',
@@ -973,6 +1000,24 @@ export class Forest {
       ring.visible = false;
       this.scene.add(ring);
       this.rippleRings.push({ mesh: ring, born: -100, delay: i * 0.17 });
+    }
+    for (let i = 0; i < 4; i++) {
+      const mat = new THREE.MeshBasicNodeMaterial({
+        color: '#8dd6d0',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      mat.opacityNode = float(1)
+        .sub(smoothstep(0.95, 1, positionWorld.xz.sub(vec2(0, 1.1)).div(vec2(2.38, 1.57)).length()))
+        .mul(materialOpacity);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.98, 1, 96), mat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(this.touchCenter.value.x, -0.016 + i * 0.001, this.touchCenter.value.y);
+      ring.visible = false;
+      this.scene.add(ring);
+      this.touchRings.push({ mesh: ring, born: -100, delay: i * 0.21 });
     }
     const splatMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#b9e0e7',
@@ -1237,8 +1282,26 @@ export class Forest {
     this.zoom = 0.6;
     this.discoverSnail();
   }
+  cycleView() {
+    this.viewIndex = (this.viewIndex + 1) % 3;
+    this.snailFocusUntil = 0;
+    this.zoom = this.viewIndex === 2 ? 0.48 : this.viewIndex === 1 ? 0.2 : 0;
+    return ['The clearing', 'Waterline', 'Leaf study'][this.viewIndex];
+  }
+  private touchWater(point: THREE.Vector3) {
+    this.touchCenter.value.set(point.x, point.z);
+    this.touchTime.value = this.elapsed;
+    this.waveCenter.value.copy(point);
+    this.waveTime.value = this.elapsed;
+    this.touchRings.forEach((r) => {
+      r.born = this.elapsed;
+      r.mesh.position.x = point.x;
+      r.mesh.position.z = point.z;
+    });
+  }
   reset() {
     this.zoom = 0;
+    this.viewIndex = 0;
     this.snailFocusUntil = 0;
     this.pointer.set(0.2, -0.1);
     this.targetLight.set(0.3, 0.45, 1.7);
@@ -1320,8 +1383,12 @@ export class Forest {
         if (this.raycaster.intersectObject(this.heroLeaf, true).length) this.drop();
         else if (this.raycaster.intersectObject(this.snailHit).length) this.focusSnail();
         else {
-          this.waveCenter.value.copy(this.targetLight);
-          this.waveTime.value = this.elapsed;
+          const waterHit = this.raycaster.intersectObject(this.waterMesh).at(0);
+          if (waterHit) this.touchWater(waterHit.point);
+          else {
+            this.waveCenter.value.copy(this.targetLight);
+            this.waveTime.value = this.elapsed;
+          }
         }
       },
       options,
@@ -1438,17 +1505,38 @@ export class Forest {
     this.currentZoom = THREE.MathUtils.lerp(this.currentZoom, this.zoom, ease);
     const focus = this.snailFocusUntil > t;
     const cam = this.mobile
-      ? new THREE.Vector3(1.6, 2.9, 10.1 - this.currentZoom * 2.3)
-      : new THREE.Vector3(
-          0.1 + this.pointer.x * 0.12 * motion,
-          2.65 + this.pointer.y * 0.08 * motion,
-          8.6 - this.currentZoom * 2.5,
-        );
-    const target = new THREE.Vector3(
-      this.mobile ? 0.65 : 0.4,
-      1.45 - this.currentZoom * 0.22,
-      0.2 + this.currentZoom * 0.15,
-    );
+      ? this.viewIndex === 1
+        ? new THREE.Vector3(-1.1, 2.15, 9.25 - this.currentZoom * 2.1)
+        : this.viewIndex === 2
+          ? new THREE.Vector3(2.7, 3.55, 7.6 - this.currentZoom * 1.8)
+          : new THREE.Vector3(1.6, 2.9, 10.1 - this.currentZoom * 2.3)
+      : this.viewIndex === 1
+        ? new THREE.Vector3(
+            -2.2 + this.pointer.x * 0.1 * motion,
+            1.8 + this.pointer.y * 0.06 * motion,
+            7.25 - this.currentZoom * 2.0,
+          )
+        : this.viewIndex === 2
+          ? new THREE.Vector3(
+              2.7 + this.pointer.x * 0.1 * motion,
+              3.45 + this.pointer.y * 0.08 * motion,
+              6.9 - this.currentZoom * 2.2,
+            )
+          : new THREE.Vector3(
+              0.1 + this.pointer.x * 0.12 * motion,
+              2.65 + this.pointer.y * 0.08 * motion,
+              8.6 - this.currentZoom * 2.5,
+            );
+    const target =
+      this.viewIndex === 1
+        ? new THREE.Vector3(0.15, 0.48 - this.currentZoom * 0.08, 1.1 + this.currentZoom * 0.2)
+        : this.viewIndex === 2
+          ? new THREE.Vector3(2.35, 2.35 - this.currentZoom * 0.12, -0.8)
+          : new THREE.Vector3(
+              this.mobile ? 0.65 : 0.4,
+              1.45 - this.currentZoom * 0.22,
+              0.2 + this.currentZoom * 0.15,
+            );
     if (focus) {
       cam.set(3.22, 1.48, 6.0);
       target.set(2.52, 0.42, 1.5);
@@ -1666,6 +1754,16 @@ export class Forest {
         r.mesh.material.opacity = Math.max(0, 0.2 * (1 - a / 2.6));
       }
     });
+    const touchAge = t - this.touchTime.value;
+    this.touchRings.forEach((r) => {
+      const a = touchAge - r.delay;
+      const radius = 0.04 + a * 0.62;
+      r.mesh.visible = a >= 0 && a < 2.25;
+      if (r.mesh.visible) {
+        r.mesh.scale.setScalar(radius);
+        r.mesh.material.opacity = Math.max(0, 0.24 * (1 - a / 2.25));
+      }
+    });
     this.splash.forEach((m, i) => {
       const a = rippleAge;
       m.visible = a >= 0 && a < 0.48;
@@ -1680,7 +1778,9 @@ export class Forest {
         m.scale.setScalar(1 - a);
       }
     });
-    const reaction = rippleAge < 5 ? Math.sin(rippleAge * 5) * Math.exp(-rippleAge) : 0;
+    const dropReaction = rippleAge < 5 ? Math.sin(rippleAge * 5) * Math.exp(-rippleAge) : 0,
+      touchReaction = touchAge < 3 ? Math.sin(touchAge * 5.4) * Math.exp(-touchAge) : 0,
+      reaction = dropReaction + touchReaction * 0.7;
     this.floatingLeaf.rotation.z = Math.sin(t * 0.7) * 0.015 * motion + reaction * 0.14;
     this.floatingLeaf.position.y = 0.013 + reaction * 0.025;
   }
@@ -1722,6 +1822,8 @@ export class Forest {
       reducedMotion: this.reducedMotion.matches,
       quality: this.quality,
       zoom: this.currentZoom,
+      viewIndex: this.viewIndex,
+      touchAge: this.elapsed - this.touchTime.value,
       drawCalls: this.renderer.info.render.drawCalls,
       triangles: this.renderer.info.render.triangles,
       heroScreen: this.heroDrop
@@ -1733,6 +1835,10 @@ export class Forest {
         .project(this.camera)
         .toArray(),
       snailScreen: this.snailHit
+        .getWorldPosition(new THREE.Vector3())
+        .project(this.camera)
+        .toArray(),
+      waterScreen: this.waterMesh
         .getWorldPosition(new THREE.Vector3())
         .project(this.camera)
         .toArray(),

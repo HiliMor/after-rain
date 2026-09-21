@@ -45,6 +45,17 @@ try {
     toast(on ? 'Move your light. The forest will follow.' : 'A moment in the moonlight.');
   });
   $('snail-button').addEventListener('click', () => forest.focusSnail());
+  $('view-button').addEventListener('click', () => {
+    const view = forest.cycleView();
+    toast(
+      view === 'Waterline'
+        ? 'A lower angle. Watch the rings travel.'
+        : view === 'Leaf study'
+          ? 'A closer angle. Follow the light on the leaf.'
+          : 'Back to the wide clearing.',
+      2400,
+    );
+  });
   $('reset-button').addEventListener('click', () => {
     forest.reset();
     toast('Back to the little clearing.', 2400);
