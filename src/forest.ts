@@ -1620,8 +1620,16 @@ export class Forest {
               0.2 + this.currentZoom * 0.15,
             );
     if (focus) {
-      cam.set(3.22, 1.48, 6.0);
-      target.set(2.52, 0.42, 1.5);
+      // Looking across the water keeps the sightline clear: the old approach came in
+      // over the bank, so undergrowth crossed in front of the one thing being shown.
+      if (this.mobile) {
+        // A narrow portrait frame cropped the head and tentacles, so it stands back.
+        cam.set(1.78, 1.13, 4.06);
+        target.set(2.68, 0.19, 1.5);
+      } else {
+        cam.set(2.05, 0.86, 3.32);
+        target.set(2.78, 0.17, 1.5);
+      }
     }
     if (this.frame === 0 || this.reducedMotion.matches) {
       this.camera.position.copy(cam);
