@@ -39,6 +39,7 @@ Environment: macOS, Node 24.18.0, Chrome 153.0.8010.48, Three.js 0.186.0, Vite 8
 - A frond behind the hero droplet gives its refraction visible detail to enlarge/distort.
 - The snail now uses a less obstructed close-up and a properly tapered tail.
 
+- Parallax pass (2026-09-21): the desktop camera barely responded to the pointer - the left and right extremes were near-identical frames - so the swing was widened roughly fourfold with the look target following a fraction of it. Both extremes were reviewed in the wide, waterline and leaf-study views: the hero leaf, pool and headline all stay framed, and the foreground now travels visibly against the log and the trunks. Touch viewports are unchanged.
 - Movement pass (2026-09-21): wheel input was normalised across delta modes after finding that a line-reporting browser moved the zoom about 33x less than a pixel-reporting one for the same physical notch; `+` / `-` were added because looking closer had no keyboard path; and the camera follow was rebuilt, having previously smoothed an already-smoothed value at half rate for roughly three quarters of a second of lag. Measured settling for three notches: 0.35 immediately, 0.45 by ~600 ms, with pixel, line and keyboard input landing within 0.01 of each other. Two tests were added (**6 passed**); the existing desktop test caught an over-tight per-event clamp during this pass, which was corrected.
 
 ## Remaining release checks

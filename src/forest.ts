@@ -1667,28 +1667,37 @@ export class Forest {
           : new THREE.Vector3(1.6, 2.9, 10.1 - this.currentZoom * 2.3)
       : this.viewIndex === 1
         ? new THREE.Vector3(
-            -2.2 + this.parallax.x * 0.1 * motion,
-            1.8 + this.parallax.y * 0.06 * motion,
+            -2.2 + this.parallax.x * 0.42 * motion,
+            1.8 + this.parallax.y * 0.22 * motion,
             7.25 - this.currentZoom * 2.0,
           )
         : this.viewIndex === 2
           ? new THREE.Vector3(
-              2.7 + this.parallax.x * 0.1 * motion,
-              3.45 + this.parallax.y * 0.08 * motion,
+              2.7 + this.parallax.x * 0.38 * motion,
+              3.45 + this.parallax.y * 0.26 * motion,
               6.9 - this.currentZoom * 2.2,
             )
           : new THREE.Vector3(
-              0.1 + this.parallax.x * 0.12 * motion,
-              2.65 + this.parallax.y * 0.08 * motion,
+              0.1 + this.parallax.x * 0.55 * motion,
+              2.65 + this.parallax.y * 0.3 * motion,
               8.6 - this.currentZoom * 2.5,
             );
+    // The look target follows a fraction of the camera's swing. Without it the wider
+    // parallax would slide the whole composition sideways; with it the camera leans around
+    // the clearing and the foreground travels against the distance, which is the part that
+    // actually reads as being somewhere.
+    const lean = this.mobile ? 0 : this.parallax.x * 0.16 * motion;
     const target =
       this.viewIndex === 1
-        ? new THREE.Vector3(0.15, 0.48 - this.currentZoom * 0.08, 1.1 + this.currentZoom * 0.2)
+        ? new THREE.Vector3(
+            0.15 + lean,
+            0.48 - this.currentZoom * 0.08,
+            1.1 + this.currentZoom * 0.2,
+          )
         : this.viewIndex === 2
-          ? new THREE.Vector3(2.35, 2.35 - this.currentZoom * 0.12, -0.8)
+          ? new THREE.Vector3(2.35 + lean, 2.35 - this.currentZoom * 0.12, -0.8)
           : new THREE.Vector3(
-              this.mobile ? 0.65 : 0.4,
+              (this.mobile ? 0.65 : 0.4) + lean,
               1.45 - this.currentZoom * 0.22,
               0.2 + this.currentZoom * 0.15,
             );
