@@ -37,6 +37,39 @@
         height: 28px;
         color: #dce7d8;
       }
+      /* Compiling the scene's materials blocks the main thread for seconds on a phone, and a
+         still screen through that is indistinguishable from a hang. Transform and opacity
+         animate on the compositor, so these keep moving while the thread is busy. */
+      #loading svg {
+        animation: drip 1.9s ease-in-out infinite;
+      }
+      #loading span {
+        animation: breathe 1.9s ease-in-out infinite;
+      }
+      @keyframes drip {
+        0%,
+        100% {
+          transform: translateY(-2px) scaleY(0.97);
+        }
+        50% {
+          transform: translateY(2px) scaleY(1.03);
+        }
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          opacity: 0.45;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #loading svg,
+        #loading span {
+          animation: none;
+        }
+      }
     </style>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>After Rain — A small world, quietly alive</title>

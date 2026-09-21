@@ -4,65 +4,101 @@
     "channel": "color",
     "file": "bark_brown_02_color.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_diff_1k.jpg",
-    "md5": "6669cca520594bdca19f94084984ab72",
-    "bytes": 659592,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "6669cca520594bdca19f94084984ab72",
+    "sourceBytes": 659592,
+    "shipped": {
+      "pixels": "1024x1024",
+      "bytes": 354822,
+      "md5": "2880c921dfab8b0b0cf1aa7f87e9293c",
+      "derivation": "JPEG re-encoded at quality 58"
+    }
   },
   {
     "asset": "bark_brown_02",
     "channel": "normal",
     "file": "bark_brown_02_normal.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_nor_gl_1k.jpg",
-    "md5": "1cad3fe0349a44df2d4d1c2859c79920",
-    "bytes": 1015623,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "1cad3fe0349a44df2d4d1c2859c79920",
+    "sourceBytes": 1015623,
+    "shipped": {
+      "pixels": "1024x1024",
+      "bytes": 530845,
+      "md5": "2f220bddad495447c75cd6a1b829cf93",
+      "derivation": "JPEG re-encoded at quality 58"
+    }
   },
   {
     "asset": "bark_brown_02",
     "channel": "arm",
     "file": "bark_brown_02_arm.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_02/bark_brown_02_arm_1k.jpg",
-    "md5": "6a566390a8930454c9ad4056273b08fb",
-    "bytes": 232742,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "6a566390a8930454c9ad4056273b08fb",
+    "sourceBytes": 232742,
+    "shipped": {
+      "pixels": "1024x1024",
+      "bytes": 222267,
+      "md5": "a2fa1efc34dbacd486c40e2f5f5defaf",
+      "derivation": "JPEG re-encoded at quality 58"
+    }
   },
   {
     "asset": "forest_leaves_02",
     "channel": "color",
     "file": "forest_leaves_02_color.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_diffuse_1k.jpg",
-    "md5": "13e9bfac07cb72ca143e153cc2f589a8",
-    "bytes": 437891,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "13e9bfac07cb72ca143e153cc2f589a8",
+    "sourceBytes": 437891,
+    "shipped": {
+      "pixels": "512x512",
+      "bytes": 143523,
+      "md5": "df139f7a38b6cf26225df83e99057656",
+      "derivation": "resized to 512 and re-encoded at quality 72"
+    }
   },
   {
     "asset": "forest_leaves_02",
     "channel": "normal",
     "file": "forest_leaves_02_normal.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_nor_gl_1k.jpg",
-    "md5": "72002432222467c74cd9980cbddb25a4",
-    "bytes": 577163,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "72002432222467c74cd9980cbddb25a4",
+    "sourceBytes": 577163,
+    "shipped": {
+      "pixels": "512x512",
+      "bytes": 164023,
+      "md5": "39b4997214f3c5bbfe65ed516b01d248",
+      "derivation": "resized to 512 and re-encoded at quality 72"
+    }
   },
   {
     "asset": "forest_leaves_02",
     "channel": "arm",
     "file": "forest_leaves_02_arm.jpg",
     "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_leaves_02/forest_leaves_02_arm_1k.jpg",
-    "md5": "876b7f364943f65c104c7b3127097596",
-    "bytes": 313980,
     "author": "Rob Tuytel",
     "license": "CC0-1.0",
-    "licenseURL": "https://polyhaven.com/license"
+    "licenseURL": "https://polyhaven.com/license",
+    "sourceMd5": "876b7f364943f65c104c7b3127097596",
+    "sourceBytes": 313980,
+    "shipped": {
+      "pixels": "512x512",
+      "bytes": 108828,
+      "md5": "c8bf932ba39ad986ae6fa66ac0847e1c",
+      "derivation": "resized to 512 and re-encoded at quality 72"
+    }
   }
 ]

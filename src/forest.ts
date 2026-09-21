@@ -65,9 +65,18 @@ export class Forest {
   readonly renderer: THREE.WebGPURenderer;
   readonly raycaster = new THREE.Raycaster();
   readonly pointer = new THREE.Vector2(0.2, -0.1);
-  readonly textures = makeTextures();
+  /** Startup cost per phase, in ms. Reported through `state()` so a slow first load on real
+   *  hardware can be attributed instead of guessed at. */
+  static readonly timings: Record<string, number> = {};
+  private static phase<T>(name: string, run: () => T): T {
+    const started = performance.now();
+    const value = run();
+    Forest.timings[name] = +(performance.now() - started).toFixed(1);
+    return value;
+  }
+  readonly textures = Forest.phase('textures', makeTextures);
   private readonly naturalSurfaces = loadNaturalSurfaces();
-  private readonly detail = makeDetailMaps();
+  private readonly detail = Forest.phase('detailMaps', makeDetailMaps);
   readonly lightPosition = uniform(new THREE.Vector3(0.3, 0.4, 2));
   readonly time = uniform(0);
   readonly waveCenter = uniform(new THREE.Vector3(0.3, 0, 1));
@@ -174,6 +183,7 @@ export class Forest {
     this.scene.environment = this.textures.env;
     this.scene.environmentIntensity = 0.65;
     this.motion.value = this.reducedMotion.matches ? 0 : 1;
+    const sceneStarted = performance.now();
     this.buildLighting();
     this.buildTerrain();
     this.buildMoss();
@@ -197,14 +207,23 @@ export class Forest {
           !(object instanceof THREE.InstancedMesh) && material.name !== 'pool-water';
       }
     });
+    Forest.timings.buildScene = +(performance.now() - sceneStarted).toFixed(1);
     this.resize();
     this.bindEvents();
   }
 
   async start() {
     try {
+      const waitStarted = performance.now();
       await this.naturalSurfaces.ready;
+      Forest.timings.awaitTextures = +(performance.now() - waitStarted).toFixed(1);
+      const initStarted = performance.now();
       await this.renderer.init();
+      Forest.timings.rendererInit = +(performance.now() - initStarted).toFixed(1);
+      // Not compileAsync here: compiling the scene's materials up front and then rendering
+      // through the post-processing chain compiles much of it twice, and measured 5.4 s to
+      // ready against 4.8 s without, on a six-times-throttled CPU.
+      const frameStarted = performance.now();
       const scenePass = pass(this.scene, this.camera);
       const output = scenePass.getTextureNode('output');
       this.pipeline = new THREE.RenderPipeline(this.renderer);
@@ -222,6 +241,7 @@ export class Forest {
       );
       this.camera.lookAt(this.mobile ? 0.65 : 0.4, 1.45, 0.2);
       this.pipeline.render();
+      Forest.timings.firstFrame = +(performance.now() - frameStarted).toFixed(1);
       this.ready = true;
       this.renderer.setAnimationLoop(this.animate);
       const backend = 'isWebGPUBackend' in this.renderer.backend ? 'WebGPU' : 'WebGL 2';
@@ -2401,6 +2421,7 @@ export class Forest {
   diagnostics() {
     return {
       ready: this.ready,
+      timings: Forest.timings,
       backend: 'isWebGPUBackend' in this.renderer.backend ? 'WebGPU' : 'WebGL 2',
       frames: this.frame,
       dropBusy: this.elapsed - this.dropStarted < 5.8,
