@@ -163,9 +163,36 @@ test('reduced motion and keyboard alternatives stay usable', async ({ page }) =>
   await page.locator('#drop-button').focus();
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
+  await page.keyboard.press('+');
+  await page.keyboard.press('+');
+  await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.3);
+  await page.keyboard.press('-');
+  await expect.poll(async () => (await state(page)).zoom).toBeLessThan(0.25);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await state(page)).zoom).toBeLessThan(0.05);
   await page.locator('#about-button').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('a wheel notch means the same in pixel and line delta modes', async ({ page }) => {
+  await ready(page);
+  await page.mouse.move(760, 460);
+  // Chrome reports pixels; Firefox reports lines for the same physical notch.
+  await page.mouse.wheel(0, 300);
+  await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);
+  const pixelMode = (await state(page)).zoom;
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await state(page)).zoom).toBeLessThan(0.05);
+  await page.evaluate(() => {
+    const target = document.querySelector('canvas')!.parentElement!;
+    for (let i = 0; i < 3; i++)
+      target.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: 3, deltaMode: 1, bubbles: true, cancelable: true }),
+      );
+  });
+  await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);
+  expect(Math.abs((await state(page)).zoom - pixelMode)).toBeLessThan(0.06);
 });
 
 test('unsupported renderer shows an actionable readable state', async ({ page }) => {

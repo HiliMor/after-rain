@@ -122,6 +122,8 @@ export class Forest {
   private lastFrame = 0;
   private elapsed = 0;
   private zoom = 0;
+  /** Eased pointer offset for camera parallax. `pointer` itself stays exact for picking. */
+  private parallax = new THREE.Vector2(0.2, -0.1);
   private currentZoom = 0;
   private viewIndex = 0;
   private gesture = new Map<number, { x: number; y: number }>();
@@ -1534,7 +1536,22 @@ export class Forest {
       'wheel',
       (event) => {
         event.preventDefault();
-        this.zoom = THREE.MathUtils.clamp(this.zoom + event.deltaY * 0.0015, 0, 1.4);
+        // deltaY arrives in pixels, lines or pages depending on the device and browser, so
+        // the raw value is not comparable between them: a line-mode wheel notch reports ~3
+        // where a pixel-mode one reports ~100. Normalise to lines so a notch means the same
+        // everywhere, and cap a single event only against absurd spikes - a deliberate hard
+        // scroll should still cross most of the range in one go.
+        const lines =
+          event.deltaMode === 1
+            ? event.deltaY
+            : event.deltaMode === 2
+              ? event.deltaY * 12
+              : event.deltaY / 33;
+        this.zoom = THREE.MathUtils.clamp(
+          this.zoom + THREE.MathUtils.clamp(lines, -12, 12) * 0.05,
+          0,
+          1.4,
+        );
         this.snailFocusUntil = 0;
       },
       { ...options, passive: false },
@@ -1564,6 +1581,16 @@ export class Forest {
             0.4,
           );
           this.updatePointer();
+        }
+        // Looking closer had no keyboard path at all: it was wheel or pinch only.
+        if (['+', '=', '-', '_'].includes(event.key)) {
+          event.preventDefault();
+          this.zoom = THREE.MathUtils.clamp(
+            this.zoom + (event.key === '-' || event.key === '_' ? -0.18 : 0.18),
+            0,
+            1.4,
+          );
+          this.snailFocusUntil = 0;
         }
         if (event.key === 'Escape') this.reset();
       },
@@ -1621,9 +1648,17 @@ export class Forest {
     this.time.value = this.elapsed;
     const t = this.elapsed,
       motion = this.motion.value;
-    const ease = 1 - Math.exp(-dt * 4);
+    const ease = 1 - Math.exp(-dt * 6);
     this.currentZoom = THREE.MathUtils.lerp(this.currentZoom, this.zoom, ease);
     const focus = this.snailFocusUntil > t;
+    // The camera used to smooth a value that was already smoothed, at half rate, so scroll
+    // took the better part of a second to land. These are separate on purpose: the frame
+    // follows quickly, the parallax offset settles slowly so a twitchy mouse cannot shake
+    // it, and the push in to the snail stays deliberate.
+    const glide = 1 - Math.exp(-dt * (focus ? 2.8 : 4.5)),
+      drift = 1 - Math.exp(-dt * 2.6);
+    this.parallax.x += (this.pointer.x - this.parallax.x) * drift;
+    this.parallax.y += (this.pointer.y - this.parallax.y) * drift;
     const cam = this.mobile
       ? this.viewIndex === 1
         ? new THREE.Vector3(-1.1, 2.15, 9.25 - this.currentZoom * 2.1)
@@ -1632,19 +1667,19 @@ export class Forest {
           : new THREE.Vector3(1.6, 2.9, 10.1 - this.currentZoom * 2.3)
       : this.viewIndex === 1
         ? new THREE.Vector3(
-            -2.2 + this.pointer.x * 0.1 * motion,
-            1.8 + this.pointer.y * 0.06 * motion,
+            -2.2 + this.parallax.x * 0.1 * motion,
+            1.8 + this.parallax.y * 0.06 * motion,
             7.25 - this.currentZoom * 2.0,
           )
         : this.viewIndex === 2
           ? new THREE.Vector3(
-              2.7 + this.pointer.x * 0.1 * motion,
-              3.45 + this.pointer.y * 0.08 * motion,
+              2.7 + this.parallax.x * 0.1 * motion,
+              3.45 + this.parallax.y * 0.08 * motion,
               6.9 - this.currentZoom * 2.2,
             )
           : new THREE.Vector3(
-              0.1 + this.pointer.x * 0.12 * motion,
-              2.65 + this.pointer.y * 0.08 * motion,
+              0.1 + this.parallax.x * 0.12 * motion,
+              2.65 + this.parallax.y * 0.08 * motion,
               8.6 - this.currentZoom * 2.5,
             );
     const target =
@@ -1670,11 +1705,12 @@ export class Forest {
       }
     }
     if (this.frame === 0 || this.reducedMotion.matches) {
+      this.parallax.copy(this.pointer);
       this.camera.position.copy(cam);
       this.lookAt.copy(target);
     } else {
-      this.camera.position.lerp(cam, ease * 0.5);
-      this.lookAt.lerp(target, ease * 0.5);
+      this.camera.position.lerp(cam, glide);
+      this.lookAt.lerp(target, glide);
     }
     this.camera.lookAt(this.lookAt);
     this.focusDistance.value = focus
