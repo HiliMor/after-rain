@@ -17,6 +17,7 @@ import {
   reflector,
   screenUV,
   cameraPosition,
+  normalWorld,
   materialOpacity,
   add,
   nodeObject,
@@ -35,6 +36,7 @@ import {
   leafGeometry,
   mossBlade,
   mossShoot,
+  shadeByHeight,
   snailHeadGeometry,
   snailMantleGeometry,
   snailShellGeometry,
@@ -343,17 +345,24 @@ export class Forest {
       bumpScale: 0.006,
       metalness: 0,
       specularIntensity: 0.17,
-      clearcoat: 0,
+      clearcoat: 0.3,
+      clearcoatRoughness: 0.36,
+      // Every instance below is given its own colour, but a colorNode here would replace
+      // the diffuse chain and quietly discard all of it, leaving one flat green carpet.
+      // The base-to-tip darkening rides in vertex colours instead, so both survive.
+      vertexColors: true,
       side: THREE.DoubleSide,
     });
-    mat.colorNode = color('#a9b882').mul(mix(0.38, 1, uv().y));
+    mat.color = new THREE.Color('#a9b882');
     const d = distance(positionWorld.xz, this.lightPosition.xz);
     const waveD = distance(positionWorld.xz, this.waveCenter.xz);
     const age = this.time.sub(this.waveTime);
     const wave = exp(waveD.sub(age.mul(1.5)).pow(2).mul(-4))
       .mul(exp(age.mul(-0.75)))
       .mul(0.36);
-    mat.emissiveNode = color('#6fa772').mul(exp(d.mul(-1.6)).mul(0.12).add(wave));
+    mat.emissiveNode = color('#6fa772')
+      .mul(exp(d.mul(-1.6)).mul(0.12).add(wave))
+      .add(this.foliageGlow(1.05));
     mat.positionNode = positionLocal.add(
       vec3(
         sin(this.time.mul(0.65).add(positionLocal.y.mul(2)))
@@ -365,7 +374,7 @@ export class Forest {
       ),
     );
     const count = this.mobile ? 17000 : 28000;
-    const moss = new THREE.InstancedMesh(mossBlade(), mat, count);
+    const moss = new THREE.InstancedMesh(shadeByHeight(mossBlade()), mat, count);
     for (let i = 0; i < count; i++) {
       let x: number, z: number;
       do {
@@ -385,7 +394,7 @@ export class Forest {
     }
     this.scene.add(moss);
     // Each patch has many fine curled leaflets and an irregular, cushioned outline.
-    const shootGeo = mossShoot();
+    const shootGeo = shadeByHeight(mossShoot(), 0.44);
     const shootCount = this.mobile ? 1900 : 2800;
     const shoots = new THREE.InstancedMesh(shootGeo, mat, shootCount);
     for (let i = 0; i < shootCount; i++) {
@@ -405,6 +414,33 @@ export class Forest {
     this.scene.add(shoots);
   }
 
+  /**
+   * Light arriving through the far side of a leaf, seen when you look back along it. Foliage
+   * at night is read mostly this way; without it every blade here was an opaque cutout.
+   * A cheap directional approximation, not a subsurface solver.
+   */
+  private foliageGlow(strength: number, tint = '#a6dc86') {
+    const toLight = this.lightPosition.sub(positionWorld),
+      dist = toLight.length().max(0.001),
+      toCamera = cameraPosition.sub(positionWorld).normalize();
+    // Offsetting the sample along the normal spreads the glow across the blade rather than
+    // pinning it to an exact back-alignment.
+    const carried = toCamera
+      .dot(toLight.div(dist).add(normalWorld.mul(0.45)).normalize().negate())
+      .saturate()
+      .pow(2.6)
+      .mul(exp(dist.mul(-1.1)))
+      .mul(strength);
+    // The moon stands behind and above the clearing, so foliage keeps some of this before
+    // the visitor brings a light anywhere near it.
+    const moonlit = toCamera
+      .dot(vec3(-0.33, 0.77, -0.55).add(normalWorld.mul(0.45)).normalize().negate())
+      .saturate()
+      .pow(3.4)
+      .mul(strength * 0.26);
+    return color(tint).mul(carried).add(color('#79b39a').mul(moonlit));
+  }
+
   private buildPlants() {
     const fernMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#9dac73',
@@ -414,10 +450,15 @@ export class Forest {
       bumpMap: this.detail.leafHeight,
       bumpScale: 0.014,
       specularIntensity: 0.25,
-      clearcoat: 0.025,
-      clearcoatRoughness: 0.6,
+      // Wet foliage is a rough leaf under a thin film of water, so the gloss belongs in the
+      // clearcoat rather than in the substrate. The film is broken up by the leaf's own
+      // relief, which keeps it a sheen instead of one blown mirror highlight.
+      clearcoat: 0.44,
+      clearcoatRoughness: 0.3,
+      clearcoatRoughnessMap: this.detail.leafRoughness,
       side: THREE.DoubleSide,
     });
+    fernMat.emissiveNode = this.foliageGlow(1.6);
     const fernGeo = fernGeometry();
     const clusters = [
       [-3.7, -0.9, 1.2],
@@ -469,10 +510,12 @@ export class Forest {
       roughnessMap: this.detail.leafRoughness,
       roughness: 0.88,
       specularIntensity: 0.3,
-      clearcoat: 0.04,
-      clearcoatRoughness: 0.5,
+      clearcoat: 0.48,
+      clearcoatRoughness: 0.28,
+      clearcoatRoughnessMap: this.detail.leafRoughness,
       side: THREE.DoubleSide,
     });
+    leafMat.emissiveNode = this.foliageGlow(1.75);
     const stemMat = new THREE.MeshStandardNodeMaterial({ color: '#4d6b3b', roughness: 0.54 });
     leafMat.positionNode = positionLocal.add(
       vec3(
@@ -842,7 +885,7 @@ export class Forest {
     });
     // A leaf underside still catches bounce light at night. Without a floor under it the
     // back faces crushed to pure black and read as a hole torn in the blade.
-    mat.emissiveNode = color('#2c4030').mul(0.2);
+    mat.emissiveNode = color('#2c4030').mul(0.2).add(this.foliageGlow(1.2));
     this.heroLeaf.position.set(3.38, 3.16, -1.5);
     this.heroLeaf.rotation.set(0.18, -0.72, -0.08);
     this.heroMesh = new THREE.Mesh(leafGeometry(3.65, 1.03, 0.52, 56, 12, 0.32), mat);

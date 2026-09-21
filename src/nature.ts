@@ -313,6 +313,20 @@ export function waterDropGeometry() {
   g.computeVertexNormals();
   return g;
 }
+/**
+ * Bake a base-to-tip darkening into vertex colours. Doing this in `colorNode` instead
+ * replaces the whole diffuse chain, which silently discards per-instance colour.
+ */
+export function shadeByHeight(geometry: THREE.BufferGeometry, base = 0.38) {
+  const uvs = geometry.attributes.uv,
+    shade = new Float32Array(uvs.count * 3);
+  for (let i = 0; i < uvs.count; i++) {
+    const f = base + (1 - base) * uvs.getY(i);
+    shade[i * 3] = shade[i * 3 + 1] = shade[i * 3 + 2] = f;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(shade, 3));
+  return geometry;
+}
 export function mossBlade() {
   const g = new THREE.BufferGeometry();
   const v: number[] = [],
