@@ -28,6 +28,7 @@ import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { loadNaturalSurfaces, makeDetailMaps } from './surfaces';
 import { FrameBudget, renderProfile } from './quality';
 import { GardenSnail } from './snail';
+import { SceneNavigation, wheelZoom } from './navigation';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   makeTextures,
@@ -113,7 +114,7 @@ export class Forest {
   private snailHit!: THREE.Mesh;
   private snailRetraction = 0;
   private snailDiscovered = false;
-  private snailFocusUntil = 0;
+  private snailFocused = false;
   private firefly = new THREE.Group();
   private pointerLight = new THREE.PointLight(0xffdc8d, 3, 5.5, 2);
   private guideLight = new THREE.PointLight(0xffce72, 1.3, 4, 2);
@@ -129,20 +130,21 @@ export class Forest {
   private frame = 0;
   private lastFrame = 0;
   private elapsed = 0;
-  private zoom = 0;
+  private readonly navigation = new SceneNavigation();
+  private presetUntil = 0;
+  private manualView = false;
   /** Eased pointer offset for camera parallax. `pointer` itself stays exact for picking. */
   private parallax = new THREE.Vector2(0.2, -0.1);
   /** Size the bead had on the leaf, carried across the moment it lets go. */
   private detachScale = new THREE.Vector3(0.32, 0.47, 0.46);
-  private currentZoom = 0;
   private viewIndex = 0;
   private gesture = new Map<number, { x: number; y: number }>();
   private pinchDistance = 0;
   private pointerStart = { x: 0, y: 0 };
-  /** Where the visitor has swung the camera to, and where it has eased to so far. */
-  private orbit = { yaw: 0, pitch: 0 };
-  private orbitEased = { yaw: 0, pitch: 0 };
   private dragOrigin: { x: number; y: number } | null = null;
+  private dragMode: 'orbit' | 'pan' = 'orbit';
+  private gestureMoved = false;
+  private gestureMulti = false;
   private pinchCentre: { x: number; y: number } | null = null;
   private hover = false;
   private snailHovered = false;
@@ -1724,29 +1726,50 @@ export class Forest {
     this.heroDrop.visible = false;
     this.runningDrop.visible = false;
     this.dripTail.visible = false;
-    this.snailFocusUntil = 0;
+    if (this.snailFocused) {
+      // A requested drop is a new subject; do not carry a tight snail dolly into the leaf view.
+      this.viewIndex = 2;
+      this.navigation.reset();
+      this.manualView = false;
+      this.presetUntil = this.elapsed + 1.3;
+    }
+    this.snailFocused = false;
     return true;
   }
   focusSnail() {
-    this.snailFocusUntil = this.elapsed + 18;
+    this.snailFocused = true;
+    this.navigation.reset();
+    this.manualView = false;
+    this.presetUntil = this.elapsed + 1.3;
     if (this.lightEnabled) this.targetLight.set(2.0, 0.75, 2.15);
-    this.zoom = 0.6;
     this.discoverSnail();
   }
   cycleView() {
     this.viewIndex = (this.viewIndex + 1) % 3;
-    this.snailFocusUntil = 0;
-    this.zoom = this.viewIndex === 2 ? 0.48 : this.viewIndex === 1 ? 0.2 : 0;
+    this.snailFocused = false;
+    this.navigation.reset();
+    this.manualView = false;
+    this.presetUntil = this.elapsed + 1.3;
     return ['The clearing', 'Waterline', 'Leaf study'][this.viewIndex];
   }
-  /**
-   * Swing the view around the clearing. Pitch is clamped well short of overhead and of the
-   * waterline: past either the framing falls apart, and there is nothing worth seeing there.
-   */
+  private beginNavigation() {
+    this.manualView = true;
+    this.presetUntil = 0;
+    this.hover = this.snailHovered = false;
+    this.cursor.style.display = 'none';
+    document.body.classList.add('exploring');
+  }
   private swing(dx: number, dy: number) {
-    this.orbit.yaw = THREE.MathUtils.clamp(this.orbit.yaw - dx * 0.0042, -0.85, 0.85);
-    this.orbit.pitch = THREE.MathUtils.clamp(this.orbit.pitch - dy * 0.0028, -0.26, 0.46);
-    this.snailFocusUntil = 0;
+    this.beginNavigation();
+    this.navigation.rotate(dx, dy, this.container.clientHeight);
+  }
+  private pan(dx: number, dy: number) {
+    this.beginNavigation();
+    this.navigation.pan(dx, dy, this.camera, this.lookAt, this.container.clientHeight);
+  }
+  private zoomBy(amount: number) {
+    this.beginNavigation();
+    this.navigation.dolly(amount);
   }
 
   private touchWater(point: THREE.Vector3) {
@@ -1756,11 +1779,11 @@ export class Forest {
     this.waveTime.value = this.elapsed;
   }
   reset() {
-    this.zoom = 0;
-    this.orbit.yaw = 0;
-    this.orbit.pitch = 0;
+    this.navigation.reset();
+    this.manualView = false;
+    this.presetUntil = this.elapsed + 1.3;
     this.viewIndex = 0;
-    this.snailFocusUntil = 0;
+    this.snailFocused = false;
     this.pointer.set(0.2, -0.1);
     this.targetLight.set(0.3, 0.45, 1.7);
     document.body.classList.remove('exploring');
@@ -1797,23 +1820,27 @@ export class Forest {
           const [a, b] = [...this.gesture.values()],
             d = Math.hypot(a.x - b.x, a.y - b.y),
             centre = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-          if (this.pinchDistance)
-            this.zoom = THREE.MathUtils.clamp(this.zoom + (d - this.pinchDistance) * 0.008, 0, 1.4);
-          // Two fingers spreading zooms, two fingers travelling swings the view. Touch keeps
-          // one finger for the light, which is the interaction the scene is built around.
+          this.gestureMoved = true;
+          if (this.pinchDistance && d > 0) this.zoomBy(Math.log(d / this.pinchDistance) / 0.72);
           if (this.pinchCentre)
-            this.swing(centre.x - this.pinchCentre.x, centre.y - this.pinchCentre.y);
+            this.pan(centre.x - this.pinchCentre.x, centre.y - this.pinchCentre.y);
           this.pinchCentre = centre;
           this.pinchDistance = d;
           return;
         }
-        // A held button means the visitor is looking around, so the light stays put: on a
-        // mouse the light already follows the bare pointer, which leaves dragging free.
-        if (this.dragOrigin && event.pointerType === 'mouse') {
-          this.swing(event.clientX - this.dragOrigin.x, event.clientY - this.dragOrigin.y);
+        if (this.dragOrigin && this.gesture.has(event.pointerId)) {
+          if (
+            !this.gestureMoved &&
+            Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y) < 6
+          )
+            return;
+          this.gestureMoved = true;
+          const dx = event.clientX - this.dragOrigin.x,
+            dy = event.clientY - this.dragOrigin.y;
+          if (this.dragMode === 'pan') this.pan(dx, dy);
+          else this.swing(dx, dy);
           this.dragOrigin = { x: event.clientX, y: event.clientY };
-          this.cursor.style.left = `${event.clientX}px`;
-          this.cursor.style.top = `${event.clientY}px`;
+          this.container.style.cursor = 'grabbing';
           return;
         }
         this.pointer.set(
@@ -1830,33 +1857,44 @@ export class Forest {
     this.container.addEventListener(
       'pointerdown',
       (event) => {
-        this.pointerStart = { x: event.clientX, y: event.clientY };
-        this.dragOrigin = { x: event.clientX, y: event.clientY };
+        if (!this.gesture.size) {
+          this.pointerStart = { x: event.clientX, y: event.clientY };
+          this.dragOrigin = { ...this.pointerStart };
+          this.dragMode =
+            event.button === 2 || event.button === 1 || event.shiftKey ? 'pan' : 'orbit';
+          this.gestureMoved = this.gestureMulti = false;
+        }
         this.gesture.set(event.pointerId, { x: event.clientX, y: event.clientY });
         this.container.setPointerCapture(event.pointerId);
-        this.pointer.set(
-          (event.clientX / innerWidth) * 2 - 1,
-          (-event.clientY / innerHeight) * 2 + 1,
-        );
-        this.updatePointer();
+        if (this.gesture.size === 2) {
+          this.gestureMulti = true;
+          const [a, b] = [...this.gesture.values()];
+          this.pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+          this.pinchCentre = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        }
+        if (event.pointerType === 'mouse') event.preventDefault();
       },
       options,
     );
     this.container.addEventListener(
       'pointerup',
       (event) => {
-        const wasPinch = this.gesture.size > 1 || this.pinchDistance > 0;
+        const wasNavigation = this.gestureMoved || this.gestureMulti || event.button !== 0;
         this.gesture.delete(event.pointerId);
-        this.dragOrigin = null;
-        if (this.gesture.size === 0) {
-          this.pinchDistance = 0;
-          this.pinchCentre = null;
-        }
+        this.dragOrigin = this.gesture.size ? { ...this.gesture.values().next().value! } : null;
+        this.pinchDistance = 0;
+        this.pinchCentre = null;
+        this.container.style.cursor = 'grab';
         if (
-          wasPinch ||
+          wasNavigation ||
           Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y) > 9
         )
           return;
+        this.pointer.set(
+          (event.clientX / innerWidth) * 2 - 1,
+          (-event.clientY / innerHeight) * 2 + 1,
+        );
+        this.updatePointer();
         this.raycaster.setFromCamera(this.pointer, this.camera);
         if (this.raycaster.intersectObject(this.heroLeaf, true).length) this.drop();
         else if (this.raycaster.intersectObject(this.snailHit).length) this.focusSnail();
@@ -1873,16 +1911,26 @@ export class Forest {
       },
       options,
     );
+    const cancelGesture = () => {
+      const ids = [...this.gesture.keys()];
+      this.gesture.clear();
+      this.dragOrigin = this.pinchCentre = null;
+      this.pinchDistance = 0;
+      this.gestureMoved = true;
+      this.container.style.cursor = 'grab';
+      for (const id of ids)
+        if (this.container.hasPointerCapture(id)) this.container.releasePointerCapture(id);
+    };
+    this.container.addEventListener('pointercancel', cancelGesture, options);
     this.container.addEventListener(
-      'pointercancel',
+      'lostpointercapture',
       (event) => {
-        this.gesture.delete(event.pointerId);
-        this.dragOrigin = null;
-        this.pinchCentre = null;
-        this.pinchDistance = 0;
+        if (this.gesture.has(event.pointerId)) cancelGesture();
       },
       options,
     );
+    window.addEventListener('blur', cancelGesture, options);
+    this.container.addEventListener('contextmenu', (event) => event.preventDefault(), options);
     this.container.addEventListener(
       'pointerleave',
       () => {
@@ -1896,23 +1944,8 @@ export class Forest {
       'wheel',
       (event) => {
         event.preventDefault();
-        // deltaY arrives in pixels, lines or pages depending on the device and browser, so
-        // the raw value is not comparable between them: a line-mode wheel notch reports ~3
-        // where a pixel-mode one reports ~100. Normalise to lines so a notch means the same
-        // everywhere, and cap a single event only against absurd spikes - a deliberate hard
-        // scroll should still cross most of the range in one go.
-        const lines =
-          event.deltaMode === 1
-            ? event.deltaY
-            : event.deltaMode === 2
-              ? event.deltaY * 12
-              : event.deltaY / 33;
-        this.zoom = THREE.MathUtils.clamp(
-          this.zoom + THREE.MathUtils.clamp(lines, -12, 12) * 0.05,
-          0,
-          1.4,
-        );
-        this.snailFocusUntil = 0;
+        if (event.shiftKey) this.pan(event.deltaX || event.deltaY, 0);
+        else this.zoomBy(wheelZoom(event.deltaY, event.deltaMode, event.ctrlKey));
       },
       { ...options, passive: false },
     );
@@ -1920,8 +1953,26 @@ export class Forest {
       'keydown',
       (event) => {
         if (document.querySelector('dialog[open]')) return;
+        if (
+          event.metaKey ||
+          event.ctrlKey ||
+          (event.target instanceof HTMLElement &&
+            (event.target.isContentEditable ||
+              /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)))
+        )
+          return;
         if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
           event.preventDefault();
+          const dx = event.key === 'ArrowLeft' ? -32 : event.key === 'ArrowRight' ? 32 : 0,
+            dy = event.key === 'ArrowUp' ? -32 : event.key === 'ArrowDown' ? 32 : 0;
+          if (event.altKey) {
+            this.pan(dx, dy);
+            return;
+          }
+          if (event.shiftKey) {
+            this.swing(dx, dy);
+            return;
+          }
           if (!this.lightEnabled) {
             this.toggleLight();
             const button = document.querySelector('#light-button');
@@ -1942,26 +1993,9 @@ export class Forest {
           );
           this.updatePointer();
         }
-        if (
-          event.shiftKey &&
-          ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
-        ) {
-          event.preventDefault();
-          this.swing(
-            event.key === 'ArrowLeft' ? -26 : event.key === 'ArrowRight' ? 26 : 0,
-            event.key === 'ArrowUp' ? -26 : event.key === 'ArrowDown' ? 26 : 0,
-          );
-          return;
-        }
-        // Looking closer had no keyboard path at all: it was wheel or pinch only.
         if (['+', '=', '-', '_'].includes(event.key)) {
           event.preventDefault();
-          this.zoom = THREE.MathUtils.clamp(
-            this.zoom + (event.key === '-' || event.key === '_' ? -0.18 : 0.18),
-            0,
-            1.4,
-          );
-          this.snailFocusUntil = 0;
+          this.zoomBy(event.key === '-' || event.key === '_' ? -0.18 : 0.18);
         }
         if (event.key === 'Escape') this.reset();
       },
@@ -1999,7 +2033,7 @@ export class Forest {
     this.hover =
       this.raycaster.intersectObject(this.heroLeaf, true).length > 0 || this.snailHovered;
     this.cursor.classList.toggle('interactive', this.hover);
-    this.container.style.cursor = this.hover ? 'pointer' : 'default';
+    this.container.style.cursor = this.hover ? 'pointer' : 'grab';
   }
 
   private isCompact(width = innerWidth, height = innerHeight) {
@@ -2054,38 +2088,37 @@ export class Forest {
     const t = this.elapsed,
       motion = this.motion.value;
     const ease = 1 - Math.exp(-dt * 6);
-    this.currentZoom = THREE.MathUtils.lerp(this.currentZoom, this.zoom, ease);
-    const focus = this.snailFocusUntil > t;
-    // The camera used to smooth a value that was already smoothed, at half rate, so scroll
-    // took the better part of a second to land. These are separate on purpose: the frame
-    // follows quickly, the parallax offset settles slowly so a twitchy mouse cannot shake
-    // it, and the push in to the snail stays deliberate.
-    const glide = 1 - Math.exp(-dt * (focus ? 2.8 : 4.5)),
+    const focus = this.snailFocused;
+    // Preset visits ease in; direct manipulation goes through just one quick smoothing
+    // stage. Passive parallax freezes once the visitor has framed their own view.
+    const glide = 1 - Math.exp(-dt * (this.presetUntil > t ? 3.8 : 12)),
       drift = 1 - Math.exp(-dt * 2.6);
-    this.parallax.x += (this.pointer.x - this.parallax.x) * drift;
-    this.parallax.y += (this.pointer.y - this.parallax.y) * drift;
+    if (!this.manualView) {
+      this.parallax.x += (this.pointer.x - this.parallax.x) * drift;
+      this.parallax.y += (this.pointer.y - this.parallax.y) * drift;
+    }
     const cam = this.mobile
       ? this.viewIndex === 1
-        ? new THREE.Vector3(-1.1, 2.15, 9.25 - this.currentZoom * 2.1)
+        ? new THREE.Vector3(-1.1, 2.15, 8.83)
         : this.viewIndex === 2
-          ? new THREE.Vector3(2.7, 3.55, 7.6 - this.currentZoom * 1.8)
-          : new THREE.Vector3(1.6, 2.9, 10.1 - this.currentZoom * 2.3)
+          ? new THREE.Vector3(2.7, 3.55, 6.736)
+          : new THREE.Vector3(1.6, 2.9, 10.1)
       : this.viewIndex === 1
         ? new THREE.Vector3(
             -2.2 + this.parallax.x * 0.42 * motion,
             1.8 + this.parallax.y * 0.22 * motion,
-            7.25 - this.currentZoom * 2.0,
+            6.85,
           )
         : this.viewIndex === 2
           ? new THREE.Vector3(
               2.7 + this.parallax.x * 0.38 * motion,
               3.45 + this.parallax.y * 0.26 * motion,
-              6.9 - this.currentZoom * 2.2,
+              5.844,
             )
           : new THREE.Vector3(
               0.1 + this.parallax.x * 0.55 * motion,
               2.65 + this.parallax.y * 0.3 * motion,
-              8.6 - this.currentZoom * 2.5,
+              8.6,
             );
     // The look target follows a fraction of the camera's swing. Without it the wider
     // parallax would slide the whole composition sideways; with it the camera leans around
@@ -2094,18 +2127,10 @@ export class Forest {
     const lean = this.mobile ? 0 : this.parallax.x * 0.16 * motion;
     const target =
       this.viewIndex === 1
-        ? new THREE.Vector3(
-            0.15 + lean,
-            0.48 - this.currentZoom * 0.08,
-            1.1 + this.currentZoom * 0.2,
-          )
+        ? new THREE.Vector3(0.15 + lean, 0.464, 1.14)
         : this.viewIndex === 2
-          ? new THREE.Vector3(2.35 + lean, 2.35 - this.currentZoom * 0.12, -0.8)
-          : new THREE.Vector3(
-              (this.mobile ? 0.65 : 0.4) + lean,
-              1.45 - this.currentZoom * 0.22,
-              0.2 + this.currentZoom * 0.15,
-            );
+          ? new THREE.Vector3(2.35 + lean, 2.2924, -0.8)
+          : new THREE.Vector3((this.mobile ? 0.65 : 0.4) + lean, 1.45, 0.2);
     if (focus) {
       // Looking across the water keeps the sightline clear: the old approach came in
       // over the bank, so undergrowth crossed in front of the one thing being shown.
@@ -2118,37 +2143,28 @@ export class Forest {
         target.copy(this.snail.position).add(new THREE.Vector3(-0.08, 0.23, 0.02));
       }
     }
-    // Apply the visitor's swing by rotating the framing around what it is looking at, so
-    // the subject stays centred and only the angle on to it changes.
-    this.orbitEased.yaw += (this.orbit.yaw - this.orbitEased.yaw) * glide;
-    this.orbitEased.pitch += (this.orbit.pitch - this.orbitEased.pitch) * glide;
-    if (
-      !focus &&
-      (Math.abs(this.orbitEased.yaw) > 1e-4 || Math.abs(this.orbitEased.pitch) > 1e-4)
-    ) {
-      const offset = cam.clone().sub(target);
-      offset.applyAxisAngle(UP, this.orbitEased.yaw);
-      const right = new THREE.Vector3().crossVectors(UP, offset).normalize();
-      offset.applyAxisAngle(right, this.orbitEased.pitch);
-      // Never let the swing drop the camera to or below the waterline.
-      offset.y = Math.max(offset.y, 0.55);
-      cam.copy(target).add(offset);
-    }
+    this.navigation.compose(cam, target);
+    cam.x = THREE.MathUtils.clamp(cam.x, -9, 9);
+    cam.z = THREE.MathUtils.clamp(cam.z, -2.8, 14);
+    cam.y = Math.max(cam.y, ground(cam.x, cam.z) + 0.2, WATER_LEVEL + 0.25);
     if (this.frame === 0 || this.reducedMotion.matches) {
-      this.parallax.copy(this.pointer);
-      this.orbitEased.yaw = this.orbit.yaw;
-      this.orbitEased.pitch = this.orbit.pitch;
       this.camera.position.copy(cam);
       this.lookAt.copy(target);
     } else {
       this.camera.position.lerp(cam, glide);
       this.lookAt.lerp(target, glide);
     }
+    // A transition's straight chord can cross a bank even when both end poses are clear.
+    this.camera.position.y = Math.max(
+      this.camera.position.y,
+      ground(this.camera.position.x, this.camera.position.z) + 0.2,
+      WATER_LEVEL + 0.25,
+    );
     this.camera.lookAt(this.lookAt);
     this.focusDistance.value = focus
       ? this.camera.position.distanceTo(this.snail.position)
-      : this.camera.position.distanceTo(new THREE.Vector3(0.7, 1.3, 1));
-    document.body.classList.toggle('exploring', this.currentZoom > 0.4 || focus);
+      : this.camera.position.distanceTo(this.lookAt);
+    document.body.classList.toggle('exploring', this.manualView || focus || this.viewIndex !== 0);
     this.pointerLight.position.lerp(this.targetLight, ease * 1.3);
     if (this.lightEnabled) this.lightPosition.value.copy(this.pointerLight.position);
     this.firefly.position.set(
@@ -2196,7 +2212,7 @@ export class Forest {
       this.label.style.top = `${(-labelPosition.y * 0.5 + 0.5) * this.container.clientHeight + 14}px`;
       this.label.style.opacity =
         !focus &&
-        this.currentZoom < 0.3 &&
+        this.navigation.zoom < 0.3 &&
         this.heroDrop.visible &&
         this.heroDrop.scale.y > 0.58 &&
         labelPosition.x < 0.48
@@ -2473,8 +2489,12 @@ export class Forest {
       reducedMotion: this.reducedMotion.matches,
       quality: this.profile.tier === 0 ? 1 : this.profile.tier === 1 ? 0.8 : 0.6,
       renderProfile: this.profile,
-      zoom: this.currentZoom,
-      orbit: [+this.orbitEased.yaw.toFixed(3), +this.orbitEased.pitch.toFixed(3)],
+      zoom: this.navigation.zoom,
+      orbit: [this.navigation.yaw, this.navigation.pitch],
+      pan: this.navigation.offset.toArray(),
+      cameraPosition: this.camera.position.toArray(),
+      cameraTarget: this.lookAt.toArray(),
+      snailFocused: this.snailFocused,
       viewIndex: this.viewIndex,
       touchAge: this.elapsed - this.touchTime.value,
       drawCalls: this.renderer.info.render.drawCalls,

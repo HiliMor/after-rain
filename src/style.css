@@ -49,6 +49,8 @@ a {
   position: absolute;
   inset: 0;
   touch-action: none;
+  cursor: grab;
+  user-select: none;
 }
 #scene canvas {
   display: block;

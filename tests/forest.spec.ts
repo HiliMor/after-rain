@@ -69,7 +69,7 @@ test('desktop: light, drop, leaf hit, snail, sound, notes and zoom work without 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.mouse.move(800, 450);
-  await page.mouse.wheel(0, 420);
+  await page.mouse.wheel(0, -420);
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await state(page)).zoom).toBeLessThan(0.05);
@@ -92,7 +92,9 @@ test('snail close-up preserves crawl position and remains framed on a phone', as
   expect(errors).toEqual([]);
 });
 
-test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser }) => {
+test('mobile: tap the leaf, orbit with one finger, pan and pinch with two, then resize', async ({
+  browser,
+}) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -114,6 +116,7 @@ test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser })
   await expect.poll(async () => (await state(page)).dropBusy).toBe(true);
   await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
   const cdp = await context.newCDPSession(page);
+  const lightBeforeDrag = (await state(page)).lightPosition;
   await cdp.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
     touchPoints: [{ x: 150, y: 550 }],
@@ -124,7 +127,8 @@ test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser })
   });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const light = (await state(page)).lightPosition;
-  expect(light).not.toEqual([0.3, 0.45, 1.7]);
+  expect(light).toEqual(lightBeforeDrag);
+  expect(Math.abs((await state(page)).orbit[0])).toBeGreaterThan(0.2);
   await cdp.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
     touchPoints: [
@@ -148,6 +152,24 @@ test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser })
   });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.2);
+  const rotationBeforePan = (await state(page)).orbit;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      { x: 110, y: 480 },
+      { x: 230, y: 480 },
+    ],
+  });
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [
+      { x: 170, y: 510 },
+      { x: 290, y: 510 },
+    ],
+  });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  expect((await state(page)).orbit).toEqual(rotationBeforePan);
+  expect(Math.hypot(...(await state(page)).pan)).toBeGreaterThan(0.15);
   await page.setViewportSize({ width: 844, height: 390 });
   await page.waitForTimeout(600);
   expect((await state(page)).renderProfile.reflectionScale).toBe(0);
@@ -169,6 +191,7 @@ test('WebGL fallback: renders and releases water', async ({ page }) => {
 });
 
 test('reduced motion and keyboard alternatives stay usable', async ({ page }) => {
+  const errors = captureErrors(page);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await ready(page);
   expect((await state(page)).reducedMotion).toBe(true);
@@ -180,6 +203,16 @@ test('reduced motion and keyboard alternatives stay usable', async ({ page }) =>
   await page.keyboard.press('ArrowLeft');
   expect((await state(page)).lightEnabled).toBe(true);
   await expect(page.locator('#light-button')).toHaveClass(/active/);
+  await page.locator('#light-button').click();
+  const stillLight = (await state(page)).lightPosition;
+  await page.keyboard.press('Shift+ArrowRight');
+  expect((await state(page)).lightPosition).toEqual(stillLight);
+  expect((await state(page)).lightEnabled).toBe(false);
+  expect(Math.abs((await state(page)).orbit[0])).toBeGreaterThan(0.05);
+  await page.keyboard.press('Alt+ArrowUp');
+  expect(Math.hypot(...(await state(page)).pan)).toBeGreaterThan(0.05);
+  expect((await state(page)).lightPosition).toEqual(stillLight);
+  await page.keyboard.press('Escape');
   await page.locator('#drop-button').focus();
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
@@ -193,6 +226,7 @@ test('reduced motion and keyboard alternatives stay usable', async ({ page }) =>
   await page.locator('#about-button').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test('dragging swings the view without moving the light, and reset restores it', async ({
@@ -215,6 +249,79 @@ test('dragging swings the view without moving the light, and reset restores it',
   expect(Math.max(...moved)).toBeLessThan(0.05);
   await page.keyboard.press('Escape');
   await expect.poll(async () => Math.abs((await state(page)).orbit[0])).toBeLessThan(0.02);
+});
+
+test('close-ups retain their subject through orbit, dolly, pan and an extended visit', async ({
+  page,
+}) => {
+  const errors = captureErrors(page);
+  await ready(page);
+  await page.getByRole('button', { name: 'A quiet neighbour' }).click();
+  await page.waitForTimeout(1800);
+  const before = await state(page);
+  const radius = (s: any) =>
+    Math.hypot(...s.cameraPosition.map((v: number, i: number) => v - s.cameraTarget[i]));
+  await page.mouse.move(840, 380);
+  await page.mouse.down();
+  await page.mouse.move(930, 420, { steps: 12 });
+  await page.mouse.up();
+  await page.mouse.wheel(0, -240);
+  await page.waitForTimeout(650);
+  const closer = await state(page);
+  expect(closer.snailFocused).toBe(true);
+  expect(radius(closer)).toBeLessThan(radius(before) * 0.9);
+  expect(
+    Math.hypot(...closer.cameraTarget.map((v: number, i: number) => v - before.cameraTarget[i])),
+  ).toBeLessThan(0.1);
+  const light = closer.lightPosition;
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(1030, 390, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(500);
+  const panned = await state(page);
+  expect(panned.orbit).toEqual(closer.orbit);
+  expect(panned.lightPosition).toEqual(light);
+  expect(Math.hypot(...panned.pan)).toBeGreaterThan(0.1);
+  expect(panned.cameraPosition[1]).toBeGreaterThan(0.22);
+  await page.screenshot({ path: 'work/navigation-snail.png' });
+  await page.waitForTimeout(18000);
+  expect((await state(page)).snailFocused).toBe(true);
+  await page.getByRole('button', { name: 'Release the drop' }).click();
+  const dropView = await state(page);
+  expect(dropView.snailFocused).toBe(false);
+  expect(dropView.viewIndex).toBe(2);
+  expect(dropView.zoom).toBe(0);
+  expect(dropView.pan).toEqual([0, 0, 0]);
+  await page.getByRole('button', { name: 'Change camera view' }).click();
+  const next = await state(page);
+  expect(next.snailFocused).toBe(false);
+  expect(next.pan).toEqual([0, 0, 0]);
+  expect(next.orbit).toEqual([0, 0]);
+  expect(next.zoom).toBe(0);
+  await page.keyboard.press('Escape');
+  expect((await state(page)).viewIndex).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('a returning drag cannot click the leaf and losing capture cannot leave navigation stuck', async ({
+  page,
+}) => {
+  await ready(page);
+  const leaf = await point(page, 'leafScreen');
+  await page.mouse.move(leaf.x, leaf.y);
+  await page.mouse.down();
+  await page.mouse.move(leaf.x + 90, leaf.y + 25, { steps: 8 });
+  await page.mouse.move(leaf.x, leaf.y, { steps: 8 });
+  await page.mouse.up();
+  expect((await state(page)).dropBusy).toBe(false);
+  await page.mouse.down();
+  await page.mouse.move(leaf.x + 60, leaf.y, { steps: 6 });
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const stopped = (await state(page)).orbit;
+  await page.mouse.move(leaf.x + 160, leaf.y + 50, { steps: 8 });
+  await page.mouse.up();
+  expect((await state(page)).orbit).toEqual(stopped);
+  expect((await state(page)).dropBusy).toBe(false);
 });
 
 test('a click that does not drag still reaches the scene', async ({ page }) => {
@@ -291,7 +398,7 @@ test('a wheel notch means the same in pixel and line delta modes', async ({ page
   await ready(page);
   await page.mouse.move(760, 460);
   // Chrome reports pixels; Firefox reports lines for the same physical notch.
-  await page.mouse.wheel(0, 300);
+  await page.mouse.wheel(0, -300);
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);
   const pixelMode = (await state(page)).zoom;
   await page.keyboard.press('Escape');
@@ -300,7 +407,7 @@ test('a wheel notch means the same in pixel and line delta modes', async ({ page
     const target = document.querySelector('canvas')!.parentElement!;
     for (let i = 0; i < 3; i++)
       target.dispatchEvent(
-        new WheelEvent('wheel', { deltaY: 3, deltaMode: 1, bubbles: true, cancelable: true }),
+        new WheelEvent('wheel', { deltaY: -3, deltaMode: 1, bubbles: true, cancelable: true }),
       );
   });
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);

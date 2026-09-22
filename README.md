@@ -35,21 +35,24 @@ The browser needs hardware accelerated WebGPU or WebGL 2. The default renderer p
 
 ## Explore
 
-| Action               | Mouse / keyboard                               | Touch                                               |
-| -------------------- | ---------------------------------------------- | --------------------------------------------------- |
-| Carry the warm light | Move over the scene; arrow keys also move it   | Touch and drag                                      |
-| Wake the moss        | Move the light, or click the forest floor      | Drag or tap the forest floor                        |
-| Release the drop     | Click the large leaf or **Release the drop**   | Tap the leaf or **Release the drop**                |
-| Find the snail       | **A quiet neighbour** brings the camera closer | Same button; approaching its shell makes it retract |
-| Look around          | Drag; Shift with the arrow keys does the same  | Two fingers travelling                              |
-| Look closer          | Scroll, or `+` / `-` keys                      | Pinch outward / inward                              |
-| Change angle         | Compass button cycles three camera views       | Same button                                         |
-| Touch the lake       | Click the pool to send rings through the water | Tap the pool                                        |
-| Return home          | **Reset view** or Escape                       | **Reset view**                                      |
-| Sound                | Optional sound button, initially off           | Same                                                |
-| Instructions         | **Field notes**, Escape to close               | **Field notes**, close button                       |
+| Action               | Mouse / keyboard                                         | Touch                                               |
+| -------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| Carry the warm light | Move over the scene; arrow keys also move it             | Tap to place the light                              |
+| Wake the moss        | Move the light, or click the forest floor                | Tap the forest floor                                |
+| Release the drop     | Click the large leaf or **Release the drop**             | Tap the leaf or **Release the drop**                |
+| Find the snail       | **A quiet neighbour** brings the camera closer           | Same button; approaching its shell makes it retract |
+| Look around          | Drag; Shift with the arrow keys does the same            | Drag with one finger                                |
+| Move the framing     | Shift + drag, right/middle drag, or Alt + arrows         | Slide two fingers                                   |
+| Look closer          | Scroll up to approach, down to step back; `+` / `-` keys | Pinch outward / inward                              |
+| Change angle         | Compass button cycles three camera views                 | Same button                                         |
+| Touch the lake       | Click the pool to send rings through the water           | Tap the pool                                        |
+| Return home          | **Reset view** or Escape                                 | **Reset view**                                      |
+| Sound                | Optional sound button, initially off                     | Same                                                |
+| Instructions         | **Field notes**, Escape to close                         | **Field notes**, close button                       |
 
-Water gathers in the cupped underside of the hero leaf. The leaf sways, the concealed bead pulls free and crawls slowly toward the tip before falling, creating ripples and splash beads. Clicking or tapping the pool sends a second set of travelling rings through the water and nudges the floating leaf. The land snail crawls slowly along the damp bank, pauses to explore with four independently bending tentacles, and withdraws when the pointer/light approaches. Its tentacles respond first; the head follows and waits briefly before emerging again. The close-up tracks the snail without changing its position, offers a gentle carried-light fill when the light is enabled, and keeps tall reeds out of the sightline. Narrow portrait stands further back so the head and tentacles stay in frame. It returns after 18 seconds or immediately with Reset view.
+Water gathers in the cupped underside of the hero leaf. The leaf sways, the concealed bead pulls free and crawls slowly toward the tip before falling, creating ripples and splash beads. Clicking or tapping the pool sends a second set of travelling rings through the water and nudges the floating leaf. The land snail crawls slowly along the damp bank, pauses to explore with four independently bending tentacles, and withdraws when the pointer/light approaches. Its tentacles respond first; the head follows and waits briefly before emerging again. The close-up tracks the snail without changing its position, offers a gentle carried-light fill when the light is enabled, and keeps tall reeds out of the sightline. Narrow portrait stands further back so the head and tentacles stay in frame. The close-up stays open while you orbit, pan or zoom; leave it with the compass or Reset view.
+
+All views share the same navigation controls. Zoom follows the current viewing direction, and pan scales with distance so close-up adjustments stay fine. Preset buttons restore their own framing. Direct movement has a short, single smoothing stage; passive pointer parallax stops changing once you frame a view yourself. Orbit and pan remain bounded to the built clearing, with a minimum viewing distance and terrain clearance; this is a diorama camera, not unrestricted first-person walking.
 
 ## Implementation
 
@@ -100,12 +103,14 @@ Water gathers in the cupped underside of the hero leaf. The leaf sways, the conc
 - `src/nature.ts` — deterministic textures, organic geometry and terrain helpers.
 - `src/surfaces.ts` — locally bundled scanned PBR maps and separate procedural surface-detail maps.
 - `src/quality.ts` — sustained frame-budget monitoring and render profiles.
+- `src/navigation.ts` — subject-relative orbit/dolly, distance-scaled pan and wheel normalization.
 - `src/snail.ts`, `src/snail-motion.ts` — procedural snail rig, ground contact and time-based behaviour.
 - `src/audio.ts` — opt-in synthesized ambience and drop sounds.
 - `src/main.ts` — interface and application lifecycle.
 - `src/style.css`, `index.html` — responsive interface and typography.
 - `tests/forest.spec.ts` — browser tests of actual inputs and renderer states.
 - `tests/quality.spec.ts` — deterministic coverage of sustained slow frames, pauses and drawing-buffer limits.
+- `tests/navigation.spec.ts` — subject-relative zoom, pan scaling, reset and wheel modes. Browser tests also cover persistent close-ups, touch gestures and drag/click separation.
 - `tests/snail-motion.spec.ts`, `tests/snail-geometry.spec.ts` — frame-rate independence, response order, reduced motion, bank contact and finite deforming geometry.
 
 Read-only diagnostic state is available as `window.__afterRain.state()` for QA. It contains scene/rendering state only.

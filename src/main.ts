@@ -42,7 +42,7 @@ try {
     const on = forest.toggleLight();
     $('light-button').setAttribute('aria-pressed', String(on));
     $('light-button').classList.toggle('active', on);
-    toast(on ? 'Move your light. The forest will follow.' : 'A moment in the moonlight.');
+    toast(on ? 'Move the pointer, or tap to place your light.' : 'A moment in the moonlight.');
   });
   $('snail-button').addEventListener('click', () => forest.focusSnail());
   $('view-button').addEventListener('click', () => {
@@ -79,8 +79,7 @@ try {
       notes.close();
   });
   if (matchMedia('(pointer: coarse)').matches)
-    $('gesture-hint').innerHTML =
-      'TOUCH & DRAG TO ILLUMINATE <span>·</span> TWO FINGERS TO LOOK AROUND';
+    $('gesture-hint').innerHTML = 'DRAG TO ORBIT <span>·</span> TWO FINGERS TO PAN / PINCH TO ZOOM';
   document.addEventListener('visibilitychange', () => {
     void audio.visibility(document.hidden);
   });
