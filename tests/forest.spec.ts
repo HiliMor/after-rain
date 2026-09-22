@@ -86,6 +86,8 @@ test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser })
     errors = captureErrors(page);
   await ready(page);
   await page.screenshot({ path: 'work/mobile-final.png' });
+  expect((await state(page)).renderProfile.depthOfField).toBe(false);
+  expect((await state(page)).renderProfile.reflectionScale).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   expect(
     await page.evaluate(() => document.querySelector('canvas')!.getBoundingClientRect().width),
@@ -131,6 +133,7 @@ test('mobile: touch the leaf, drag light, pinch and resize', async ({ browser })
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.2);
   await page.setViewportSize({ width: 844, height: 390 });
   await page.waitForTimeout(600);
+  expect((await state(page)).renderProfile.reflectionScale).toBe(0);
   await expect(page.locator('#error')).toBeHidden();
   expect(errors).toEqual([]);
   await context.close();
@@ -211,6 +214,7 @@ test('a click that does not drag still reaches the scene', async ({ page }) => {
 });
 
 test('interface blocks do not collide on short or awkward windows', async ({ page }) => {
+  const errors = captureErrors(page);
   // The headline was sized from viewport width alone, so a short window let it run down
   // into the footer and overlap the location caption.
   for (const [width, height] of [
@@ -245,6 +249,25 @@ test('interface blocks do not collide on short or awkward windows', async ({ pag
     });
     expect(collisions, `${width}x${height}`).toEqual([]);
   }
+  expect(errors).toEqual([]);
+});
+
+test('resizing switches render passes without breaking water interaction', async ({ page }) => {
+  const errors = captureErrors(page);
+  await ready(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await state(page)).renderProfile.reflectionScale).toBe(0);
+  expect((await state(page)).renderProfile.depthOfField).toBe(false);
+  await page.getByRole('button', { name: 'Release the drop' }).click();
+  await expect.poll(async () => (await state(page)).rippleAge).toBeLessThan(1);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect
+    .poll(async () => (await state(page)).renderProfile.reflectionScale)
+    .toBeGreaterThan(0);
+  const water = await point(page, 'waterScreen');
+  await page.mouse.click(water.x, water.y);
+  await expect.poll(async () => (await state(page)).touchAge).toBeLessThan(1);
+  expect(errors).toEqual([]);
 });
 
 test('a wheel notch means the same in pixel and line delta modes', async ({ page }) => {

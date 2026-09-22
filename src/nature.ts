@@ -13,8 +13,21 @@ export function random(seed = 921) {
 export const rand = random();
 export const range = (a: number, b: number) => a + rand() * (b - a);
 export function ground(x: number, z: number) {
-  const shore = Math.min(1, Math.max(0, (Math.hypot(x / 2.35, (z - 1.1) / 1.55) - 0.83) * 2.3));
-  return -0.13 + shore * (0.2 + 0.16 * Math.sin(x * 1.7 + z) + 0.09 * Math.cos(z * 2.7 - x));
+  const radius = Math.hypot(x / 2.35, (z - 1.1) / 1.55);
+  const shore = Math.min(1, Math.max(0, (radius - 0.83) * 2.3));
+  const bowl = THREE.MathUtils.smoothstep(radius, 0.15, 0.92);
+  return (
+    -0.13 -
+    (1 - bowl) * 0.21 +
+    shore * (0.2 + 0.16 * Math.sin(x * 1.7 + z) + 0.09 * Math.cos(z * 2.7 - x))
+  );
+}
+
+/** Broad connected cushions, with small gaps rather than independent random blades. */
+export function mossDensity(x: number, z: number) {
+  const broad = Math.sin(x * 1.31 + Math.sin(z * 0.86) * 1.8) * Math.cos(z * 1.47 - x * 0.24);
+  const fine = Math.sin(x * 4.7 + z * 2.9) * Math.sin(z * 3.2 - x * 1.9);
+  return THREE.MathUtils.clamp(0.48 + broad * 0.4 + fine * 0.12, 0.06, 1);
 }
 export function outsidePool(x: number, z: number, margin = 1) {
   return Math.hypot(x / 2.35, (z - 1.1) / 1.55) > margin;
@@ -384,13 +397,13 @@ export function mossBlade() {
   g.computeVertexNormals();
   return g;
 }
-export function fernGeometry() {
+export function fernGeometry(variant = 0) {
   const parts: THREE.BufferGeometry[] = [];
   const stem = new THREE.CatmullRomCurve3([
     new THREE.Vector3(),
-    new THREE.Vector3(0, 0.65, 0.2),
-    new THREE.Vector3(0, 1.2, 0.8),
-    new THREE.Vector3(0, 1.28, 1.6),
+    new THREE.Vector3(0.04 * variant, 0.65, 0.2),
+    new THREE.Vector3(0.1 * variant, 1.2 - variant * 0.08, 0.8),
+    new THREE.Vector3(0.18 * variant, 1.28 - variant * 0.22, 1.6),
   ]);
   parts.push(new THREE.TubeGeometry(stem, 24, 0.012, 4));
   for (let i = 1; i < 19; i++) {
@@ -398,6 +411,8 @@ export function fernGeometry() {
       p = stem.getPoint(t),
       l = Math.sin(t * Math.PI) * 0.6;
     for (const side of [-1, 1]) {
+      // Older fronds lose an occasional leaflet; keep these omissions asymmetric.
+      if (variant > 0 && (i * 7 + side + variant * 3) % 13 === 0) continue;
       const g = leafGeometry(l * (1 + Math.sin(i * 17 + side) * 0.07), l * 0.13, 0.026, 12);
       // A pinnate frond has irregular toothed leaflets, not inflated spoon shapes.
       const positions = g.attributes.position;
@@ -420,16 +435,23 @@ export function fernGeometry() {
 }
 
 /** Small curled leaves around a leaning moss stem; rounder than triangular grass. */
-export function mossShoot() {
+export function mossShoot(variant = 0) {
   const pieces: THREE.BufferGeometry[] = [];
-  for (let ring = 0; ring < 6; ring++)
-    for (let side = 0; side < 5; side++) {
-      const angle = (side / 5) * Math.PI * 2 + ring * 1.1;
-      const length = 0.145 * (1 - ring * 0.09);
+  const rings = 4 + (variant % 2),
+    sides = 4;
+  for (let ring = 0; ring < rings; ring++)
+    for (let side = 0; side < sides; side++) {
+      const angle = (side / sides) * Math.PI * 2 + ring * (1.1 + variant * 0.2);
+      const length =
+        0.145 * (1 - ring * 0.12) * (1 + 0.16 * Math.sin(side * 8 + ring * 3 + variant));
       const leaf = leafGeometry(length, length * 0.13, length * 0.2, 5, 2);
       leaf.rotateX(-0.35 - ring * 0.05);
       leaf.rotateY(angle);
-      leaf.translate(Math.sin(ring * 0.4) * 0.035, ring * 0.065, ring * 0.007);
+      leaf.translate(
+        Math.sin(ring * 0.4 + variant) * ring * 0.012,
+        ring * 0.061,
+        ring * ring * 0.003 * (variant - 1),
+      );
       pieces.push(leaf);
     }
   const geometry = mergeGeometries(pieces);

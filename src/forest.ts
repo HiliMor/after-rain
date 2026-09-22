@@ -26,6 +26,7 @@ import {
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { loadNaturalSurfaces, makeDetailMaps } from './surfaces';
+import { FrameBudget, renderProfile } from './quality';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   makeTextures,
@@ -36,6 +37,7 @@ import {
   leafGeometry,
   mossBlade,
   mossShoot,
+  mossDensity,
   shadeByHeight,
   snailHeadGeometry,
   snailMantleGeometry,
@@ -88,6 +90,11 @@ export class Forest {
   readonly motion = uniform(1);
   readonly focusDistance = uniform(7.8);
   private pipeline!: THREE.RenderPipeline;
+  private cinematicOutput?: THREE.Node<'vec4'>;
+  private leanOutput?: THREE.Node<'vec4'>;
+  private waterReflection?: ReturnType<typeof reflector>;
+  private reflectiveWater?: THREE.MeshPhysicalNodeMaterial;
+  private simpleWater?: THREE.MeshPhysicalNodeMaterial;
   private keyShadow?: THREE.LightShadow;
   private heroLeaf = new THREE.Group();
   private heroMesh!: THREE.Mesh;
@@ -151,10 +158,9 @@ export class Forest {
   private label = document.querySelector<HTMLElement>('#world-label')!;
   private cursor = document.querySelector<HTMLElement>('#cursor')!;
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  private quality = 1;
-  private slowFrames = 0;
-  private adjustedQuality = false;
-  private mobile = innerWidth < 680;
+  private readonly frameBudget = new FrameBudget();
+  private mobile = this.isCompact();
+  private profile = renderProfile(innerWidth, innerHeight, devicePixelRatio, this.mobile, 0);
   lightEnabled = true;
 
   constructor(
@@ -168,7 +174,7 @@ export class Forest {
       forceWebGL,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1.35 : 1.65));
+    this.renderer.setPixelRatio(this.profile.pixelRatio);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.25;
     this.renderer.shadowMap.enabled = true;
@@ -181,13 +187,14 @@ export class Forest {
     this.scene.backgroundNode = mix(color('#12293a'), color('#081824'), screenUV.y.pow(0.75));
     this.scene.fog = new THREE.FogExp2('#0e2433', 0.057);
     this.scene.environment = this.textures.env;
-    this.scene.environmentIntensity = 0.65;
+    this.scene.environmentIntensity = 0.5;
     this.motion.value = this.reducedMotion.matches ? 0 : 1;
     const sceneStarted = performance.now();
     this.buildLighting();
     this.buildTerrain();
     this.buildMoss();
     this.buildPlants();
+    this.buildLitter();
     this.buildBark();
     this.buildMushrooms();
     this.buildHero();
@@ -198,6 +205,10 @@ export class Forest {
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
       const material = Array.isArray(object.material) ? object.material[0] : object.material;
+      // Reflections show the opaque forest. Refracting droplets inside the smaller mirror
+      // pass would resize Three's transmission buffer while the main pass is using it.
+      if (material instanceof THREE.MeshPhysicalNodeMaterial && material.transmission > 0)
+        object.layers.set(1);
       if (
         material instanceof THREE.MeshStandardNodeMaterial &&
         !(material instanceof THREE.MeshPhysicalNodeMaterial && material.transmission > 0)
@@ -207,6 +218,9 @@ export class Forest {
           !(object instanceof THREE.InstancedMesh) && material.name !== 'pool-water';
       }
     });
+    this.camera.layers.enable(1);
+    this.raycaster.layers.enable(1);
+    this.waterReflection?.reflector.getVirtualCamera(this.camera).layers.set(0);
     Forest.timings.buildScene = +(performance.now() - sceneStarted).toFixed(1);
     this.resize();
     this.bindEvents();
@@ -228,12 +242,13 @@ export class Forest {
       const output = scenePass.getTextureNode('output');
       this.pipeline = new THREE.RenderPipeline(this.renderer);
       // The r186 addon declares an untyped TempNode; its implementation returns vec4.
-      const focused = this.mobile
-        ? output
-        : (nodeObject(
-            dof(output, scenePass.getViewZNode(), this.focusDistance, 3.4, 0.65),
-          ) as unknown as THREE.Node<'vec4'>);
-      this.pipeline.outputNode = add(focused, bloom(output, 0.16, 0.4, 1.25));
+      const focused = nodeObject(
+        dof(output, scenePass.getViewZNode(), this.focusDistance, 3.4, 0.55),
+      ) as unknown as THREE.Node<'vec4'>;
+      const glow = bloom(output, 0.12, 0.4, 1.35);
+      this.cinematicOutput = add(focused, glow);
+      this.leanOutput = add(output, glow);
+      this.applyRenderProfile();
       this.camera.position.set(
         this.mobile ? 1.6 : 0.1,
         this.mobile ? 2.9 : 2.65,
@@ -252,11 +267,11 @@ export class Forest {
   }
 
   private buildLighting() {
-    this.scene.add(new THREE.HemisphereLight(0x9bbcc8, 0x343d22, 1.85));
-    const moon = new THREE.DirectionalLight(0xa7d2ed, 2.15);
+    this.scene.add(new THREE.HemisphereLight(0x9bbcc8, 0x242b19, 1.2));
+    const moon = new THREE.DirectionalLight(0xb0d8ec, 2.5);
     moon.position.set(-3, 7, -5);
     this.scene.add(moon);
-    const front = new THREE.DirectionalLight(0xc4d6bb, 1.65);
+    const front = new THREE.DirectionalLight(0xc4d6bb, 0.95);
     front.position.set(-2.5, 6, 5);
     front.castShadow = true;
     front.shadow.mapSize.setScalar(this.mobile ? 1024 : 2048);
@@ -275,9 +290,14 @@ export class Forest {
     front.shadow.needsUpdate = true;
     this.keyShadow = front.shadow;
     this.scene.add(front);
-    const rim = new THREE.PointLight(0x67bcb4, 6, 12, 2);
+    const rim = new THREE.PointLight(0x88bcb1, 4.5, 9, 2);
     rim.position.set(0, 3, -2.8);
     this.scene.add(rim);
+    // A soft gap in the canopy draws the eye to the leaf without filling the whole floor.
+    const leafLight = new THREE.SpotLight(0xd6e5bf, 19, 11, 0.48, 1, 2);
+    leafLight.position.set(-1.8, 6.8, 1.3);
+    leafLight.target.position.set(0.8, 2.9, -0.2);
+    this.scene.add(leafLight, leafLight.target);
     this.pointerLight.position.copy(this.targetLight);
     this.scene.add(this.pointerLight);
     this.scene.add(this.guideLight);
@@ -299,6 +319,13 @@ export class Forest {
       aoMapIntensity: 0.85,
       roughness: 1,
     });
+    const dryBank = smoothstep(WATER_LEVEL + 0.025, WATER_LEVEL + 0.19, positionWorld.y);
+    mat.colorNode = texture(this.naturalSurfaces.maps.groundColor).rgb.mul(
+      mix(color('#424e37'), color('#8b9a72'), dryBank),
+    );
+    mat.roughnessNode = texture(this.naturalSurfaces.maps.groundArm)
+      .g.mul(mix(float(0.7), float(1), dryBank))
+      .max(0.65);
     this.scene.add(new THREE.Mesh(terrain, mat));
     const pebbleMat = new THREE.MeshPhysicalNodeMaterial({
       color: '#85816c',
@@ -310,18 +337,19 @@ export class Forest {
       clearcoat: 0.04,
       clearcoatRoughness: 0.6,
     });
-    const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), pebbleMat, 190);
-    for (let i = 0; i < 190; i++) {
+    const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), pebbleMat, 300);
+    for (let i = 0; i < 300; i++) {
       const a = range(0, Math.PI * 2),
-        r = range(0.98, 1.16),
+        r = i < 190 ? range(0.98, 1.16) : range(0.42, 1.02),
         x = Math.cos(a) * 2.35 * r,
         z = 1.1 + Math.sin(a) * 1.55 * r;
-      this.dummy.position.set(x, ground(x, z) - 0.025, z);
-      this.dummy.scale.set(range(0.045, 0.14), range(0.045, 0.085), range(0.06, 0.2));
+      this.dummy.position.set(x, ground(x, z) - 0.045, z);
+      this.dummy.scale.set(range(0.045, 0.16), range(0.025, 0.065), range(0.06, 0.21));
+      if (i >= 190) this.dummy.scale.multiplyScalar(0.7);
       this.dummy.rotation.set(rand() * 3, rand() * 6, rand() * 3);
       this.dummy.updateMatrix();
       pebbles.setMatrixAt(i, this.dummy.matrix);
-      pebbles.setColorAt(i, new THREE.Color().setHSL(range(0.12, 0.2), 0.11, range(0.16, 0.36)));
+      pebbles.setColorAt(i, new THREE.Color().setHSL(range(0.08, 0.19), 0.12, range(0.28, 0.58)));
     }
     this.scene.add(pebbles);
     const treeMat = new THREE.MeshStandardNodeMaterial({
@@ -384,7 +412,7 @@ export class Forest {
       .mul(exp(age.mul(-0.75)))
       .mul(0.36);
     mat.emissiveNode = color('#6fa772')
-      .mul(exp(d.mul(-1.6)).mul(0.12).add(wave))
+      .mul(exp(d.mul(-1.6)).mul(0.065).add(wave.mul(0.65)))
       .add(this.foliageGlow(1.05));
     mat.positionNode = positionLocal.add(
       vec3(
@@ -403,8 +431,13 @@ export class Forest {
       do {
         x = range(-9, 9);
         z = range(-6.5, 5.8);
-      } while (!outsidePool(x, z, 1.02) || (x > 1.8 && x < 3.8 && z > -0.7 && z < 1.2));
-      const h = range(0.035, 0.12) * (1 + 0.8 * Math.sin(x * 3.2) * Math.sin(z * 3.7));
+      } while (
+        !outsidePool(x, z, 1.02) ||
+        (x > 1.8 && x < 3.8 && z > -0.7 && z < 1.2) ||
+        rand() > mossDensity(x, z)
+      );
+      const patch = mossDensity(x, z);
+      const h = range(0.025, 0.115) * (0.5 + patch * 1.15);
       this.dummy.position.set(x, ground(x, z), z);
       this.dummy.rotation.set(range(-0.5, 0.5), rand() * 6.28, range(-0.4, 0.4));
       this.dummy.scale.set(h * range(0.5, 1.4), h, h);
@@ -412,29 +445,43 @@ export class Forest {
       moss.setMatrixAt(i, this.dummy.matrix);
       moss.setColorAt(
         i,
-        new THREE.Color().setHSL(range(0.19, 0.29), range(0.26, 0.55), range(0.14, 0.4)),
+        new THREE.Color().setHSL(
+          0.18 + patch * 0.08 + range(-0.015, 0.015),
+          range(0.28, 0.5),
+          range(0.17, 0.34),
+        ),
       );
     }
     this.scene.add(moss);
     // Each patch has many fine curled leaflets and an irregular, cushioned outline.
-    const shootGeo = shadeByHeight(mossShoot(), 0.44);
-    const shootCount = this.mobile ? 1900 : 2800;
-    const shoots = new THREE.InstancedMesh(shootGeo, mat, shootCount);
-    for (let i = 0; i < shootCount; i++) {
-      let x: number, z: number;
-      do {
-        x = range(-5.5, 5.5);
-        z = range(-3.5, 4.2);
-      } while (!outsidePool(x, z, 1.1));
-      const s = range(0.25, 0.6) * (1 + 0.45 * Math.sin(x * 3.2) * Math.sin(z * 3.7));
-      this.dummy.position.set(x, ground(x, z), z);
-      this.dummy.scale.setScalar(s);
-      this.dummy.rotation.set(range(-0.3, 0.3), rand() * 7, range(-0.4, 0.4));
-      this.dummy.updateMatrix();
-      shoots.setMatrixAt(i, this.dummy.matrix);
-      shoots.setColorAt(i, new THREE.Color().setHSL(range(0.18, 0.28), 0.4, range(0.2, 0.44)));
+    const shootCount = this.mobile ? 280 : 480;
+    for (let variant = 0; variant < 3; variant++) {
+      const shootGeo = shadeByHeight(mossShoot(variant), 0.34);
+      const shoots = new THREE.InstancedMesh(shootGeo, mat, shootCount);
+      for (let i = 0; i < shootCount; i++) {
+        let x: number, z: number;
+        do {
+          x = range(-5.5, 5.5);
+          z = range(-3.5, 4.2);
+        } while (!outsidePool(x, z, 1.1) || rand() > Math.pow(mossDensity(x, z), 2));
+        const patch = mossDensity(x, z);
+        const s = range(0.19, 0.58) * (0.55 + patch * 0.65);
+        this.dummy.position.set(x, ground(x, z), z);
+        this.dummy.scale.set(s * range(0.7, 1.3), s * range(0.65, 1.4), s);
+        this.dummy.rotation.set(range(-0.3, 0.3), rand() * 7, range(-0.4, 0.4));
+        this.dummy.updateMatrix();
+        shoots.setMatrixAt(i, this.dummy.matrix);
+        shoots.setColorAt(
+          i,
+          new THREE.Color().setHSL(
+            0.18 + patch * 0.07 + range(-0.02, 0.02),
+            0.38,
+            range(0.21, 0.4),
+          ),
+        );
+      }
+      this.scene.add(shoots);
     }
-    this.scene.add(shoots);
     this.buildDew();
   }
 
@@ -529,7 +576,8 @@ export class Forest {
       .mul(0.36)
       .add(0.03);
     fernMat.emissiveNode = this.foliageGlow(1.6);
-    const fernGeo = fernGeometry();
+    const fernVariants = [fernGeometry(), fernGeometry(1), fernGeometry(2)];
+    const fernGeo = fernVariants[0];
     const clusters = [
       [-3.7, -0.9, 1.2],
       [3.7, -1.4, 1.6],
@@ -543,11 +591,13 @@ export class Forest {
     for (const [x, z, scale] of clusters) {
       const group = new THREE.Group();
       group.position.set(x, ground(x, z), z);
-      for (let j = 0; j < 7; j++) {
-        const fern = new THREE.Mesh(fernGeo, fernMat);
-        fern.rotation.y = (j / 7) * Math.PI * 2;
-        fern.rotation.x = range(-0.25, 0.25);
-        fern.scale.setScalar(scale * range(0.75, 1));
+      const fronds = Math.floor(range(4, 8));
+      for (let j = 0; j < fronds; j++) {
+        const fern = new THREE.Mesh(fernVariants[j % 3], fernMat);
+        fern.rotation.y = (j / fronds) * Math.PI * 2 + range(-0.28, 0.28);
+        fern.rotation.x = range(-0.4, 0.2);
+        fern.rotation.z = range(-0.12, 0.12);
+        fern.scale.set(scale * range(0.65, 1.1), scale * range(0.62, 1), scale * range(0.7, 1.1));
         group.add(fern);
       }
       this.scene.add(group);
@@ -598,15 +648,15 @@ export class Forest {
     leafMat.positionNode = positionLocal.add(
       vec3(
         sin(this.time.mul(0.42).add(positionLocal.y.mul(2.2)))
-          .mul(positionLocal.y.pow(1.35))
+          .mul(positionLocal.y.max(0).pow(1.35))
           .mul(0.035)
           .mul(this.motion),
         sin(this.time.mul(0.28).add(positionLocal.z))
-          .mul(positionLocal.y.pow(1.4))
+          .mul(positionLocal.y.max(0).pow(1.4))
           .mul(0.008)
           .mul(this.motion),
         cos(this.time.mul(0.35).add(positionLocal.x.mul(2)))
-          .mul(positionLocal.y.pow(1.2))
+          .mul(positionLocal.y.max(0).pow(1.2))
           .mul(0.018)
           .mul(this.motion),
       ),
@@ -766,6 +816,74 @@ export class Forest {
       bead.position.copy(tip);
       this.scene.add(bead);
     }
+  }
+
+  private buildLitter() {
+    const leaves: THREE.BufferGeometry[] = [],
+      twigs: THREE.BufferGeometry[] = [];
+    const material = new THREE.MeshPhysicalNodeMaterial({
+      map: this.textures.leaf,
+      bumpMap: this.textures.leafRelief,
+      bumpScale: 0.014,
+      roughness: 0.86,
+      clearcoat: 0.16,
+      clearcoatRoughness: 0.42,
+      vertexColors: true,
+      side: THREE.DoubleSide,
+    });
+    for (let i = 0; i < (this.mobile ? 55 : 100); i++) {
+      let x: number, z: number;
+      do {
+        x = range(-5.7, 5.7);
+        z = range(-3.5, 4.5);
+      } while (!outsidePool(x, z, 1.05) || rand() < mossDensity(x, z) * 0.55);
+      const length = range(0.16, 0.5);
+      const leaf = leafGeometry(
+        length,
+        length * range(0.23, 0.43),
+        range(0.008, 0.045),
+        9,
+        4,
+        -0.03,
+      );
+      leaf.rotateY(range(0, Math.PI * 2));
+      const positions = leaf.attributes.position,
+        coords = leaf.attributes.uv;
+      const shades = new Float32Array(positions.count * 3);
+      const tint = new THREE.Color().setHSL(range(0.065, 0.15), range(0.3, 0.58), range(0.3, 0.58));
+      for (let v = 0; v < positions.count; v++) {
+        const wx = x + positions.getX(v),
+          wz = z + positions.getZ(v);
+        positions.setXYZ(v, wx, ground(wx, wz) - 0.042 + positions.getY(v), wz);
+        const damage = 0.65 + 0.35 * Math.sin(coords.getY(v) * 13 + i) ** 2;
+        shades.set([tint.r * damage, tint.g * damage, tint.b * damage], v * 3);
+      }
+      leaf.setAttribute('color', new THREE.BufferAttribute(shades, 3));
+      leaf.computeVertexNormals();
+      leaves.push(leaf);
+      if (i % 4 === 0) {
+        const dx = range(-0.38, 0.38),
+          dz = range(-0.3, 0.3);
+        const curve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(x, ground(x, z) - 0.035, z),
+          new THREE.Vector3(x + dx * 0.5, ground(x + dx * 0.5, z + dz * 0.5) - 0.025, z + dz * 0.5),
+          new THREE.Vector3(x + dx, ground(x + dx, z + dz) - 0.035, z + dz),
+        ]);
+        twigs.push(new THREE.TubeGeometry(curve, 5, range(0.007, 0.016), 4, false));
+      }
+    }
+    this.scene.add(new THREE.Mesh(mergeGeometries(leaves), material));
+    this.scene.add(
+      new THREE.Mesh(
+        mergeGeometries(twigs),
+        new THREE.MeshStandardNodeMaterial({
+          color: '#594535',
+          map: this.textures.bark,
+          roughness: 0.87,
+        }),
+      ),
+    );
+    [...leaves, ...twigs].forEach((geometry) => geometry.dispose());
   }
 
   private buildBark() {
@@ -1193,17 +1311,14 @@ export class Forest {
 
   private buildWater() {
     const water = new THREE.MeshPhysicalNodeMaterial({
-      color: '#587c82',
-      metalness: 0.12,
-      roughness: 0.24,
-      clearcoat: 0.58,
-      clearcoatRoughness: 0.16,
-      transmission: 0.2,
-      thickness: 0.22,
+      color: '#1a3937',
+      metalness: 0,
+      roughness: 0.1,
+      clearcoat: 0.12,
+      clearcoatRoughness: 0.12,
+      transmission: 0,
       ior: 1.333,
-      attenuationColor: '#1d5b61',
-      attenuationDistance: 2.8,
-      specularIntensity: 0.62,
+      specularIntensity: 0.8,
       side: THREE.DoubleSide,
     });
     water.name = 'pool-water';
@@ -1308,68 +1423,59 @@ export class Forest {
       .sub(vec2(0, POOL_CENTER_Z))
       .div(vec2(POOL_RADIUS_X, POOL_RADIUS_Z))
       .length();
-    const floorHeight = shoreRamp.sub(0.83).mul(2.3).clamp(0, 1).mul(bankRise).sub(0.185);
+    const floorHeight = shoreRamp
+      .sub(0.83)
+      .mul(2.3)
+      .clamp(0, 1)
+      .mul(bankRise)
+      .sub(0.185)
+      .sub(
+        float(1)
+          .sub(smoothstep(0.15, 0.92, shoreRamp))
+          .mul(0.21),
+      );
     const depth = float(WATER_LEVEL).sub(floorHeight).max(0);
-    const depthMix = smoothstep(0.012, 0.115, depth);
+    const depthMix = smoothstep(0.025, 0.36, depth);
     // Grazing angles reflect, steep ones look into the water: the difference is most of
     // what separates a pool from a sheet of tinted glass.
     const fresnel = cameraPosition.sub(positionWorld).normalize().y.abs().oneMinus().pow(3.2);
-    const shimmer = sin(
-      positionWorld.x.mul(5.4).add(positionWorld.z.mul(3.8)).add(this.time.mul(0.32)),
-    )
-      .mul(0.5)
-      .add(0.5);
-    // The bed read through the water. Without it the body was a smooth tone ramp, which is
-    // what left the pool looking like dusty glass whenever nothing lit it from nearby: a
-    // shallow pool is mostly read by the litter and silt visible through it.
-    // What you actually read a ripple by in a shallow pool is the bed bending underneath it
-    // and the reflection breaking up, not the shading of the surface itself.
     const disturbance = ripple.add(touchRipple);
-    const bed = texture(
-      this.naturalSurfaces.maps.groundColor,
-      positionWorld.xz
-        .mul(0.42)
-        .add(vec2(0.31, 0.12))
-        .add(vec2(disturbance.mul(0.55), disturbance.mul(0.42))),
-    ).rgb.mul(color('#7d9a86'));
-    const deepTone = mix(color('#06202a'), color('#2d5d5b'), shimmer.mul(0.16).add(0.14)),
-      shallowTone = mix(color('#26362c'), color('#47624b'), shimmer.mul(0.2).add(0.22)),
-      // Light reaching the bed and coming back falls away quickly with depth.
-      bedThrough = exp(depth.mul(-11)).mul(0.85),
-      waterTone = mix(shallowTone, deepTone, depthMix).add(bed.mul(bedThrough));
-    // Tilting the surface changes how much sky and how much bed each point shows, so a
-    // passing wave brightens along one face and darkens along the other. Over the middle of
-    // the pool, where the bed is too deep to read and the reflection is weak at this angle,
-    // this is the only channel with enough contrast to carry the wave at all.
-    const waveShading = float(1).add(disturbance.mul(2.6)).max(0.15);
-    const lightThroughWater = exp(distance(positionWorld.xz, this.lightPosition.xz).mul(-1.35)).mul(
-        0.26,
-      ),
-      litWaterTone = mix(waterTone, color('#78c4ae'), lightThroughWater).mul(waveShading);
-    water.emissiveNode = color('#4f978a')
-      .mul(lightThroughWater.mul(depthMix).mul(0.2))
-      .add(color('#cfe6f2').mul(glitter.mul(depthMix.mul(0.55).add(0.45))));
-    if (!this.mobile) {
-      const reflection = reflector({ resolutionScale: 1, bounces: false });
+    // Blend the actual bed and submerged stones through a depth-tinted surface. The pool
+    // needs no additional transmission pass; the hero droplet keeps physical refraction.
+    // Painting a second bed into diffuse colour had made the old water look milky.
+    water.colorNode = mix(color('#31524a'), color('#0b252c'), depthMix);
+    const sheen = color('#bbd8e2').mul(glitter.mul(0.3));
+    water.emissiveNode = sheen;
+    // Keep both material graphs, so a low tier really stops the reflection render pass.
+    this.simpleWater = water;
+    const reflectedWater = water.clone();
+    this.reflectiveWater = reflectedWater;
+    {
+      const reflection = reflector({
+        resolutionScale: this.profile.reflectionScale || 0.4,
+        bounces: false,
+      });
+      this.waterReflection = reflection;
       reflection.target.rotation.x = -Math.PI / 2;
-      reflection.target.position.y = -0.035;
+      reflection.target.position.y = WATER_LEVEL;
       this.scene.add(reflection.target);
       reflection.uvNode = screenUV
         .flipX()
         .add(vec2(disturbance.mul(0.16).add(still), disturbance.mul(0.1)));
-      water.colorNode = mix(litWaterTone, reflection.rgb, fresnel.mul(0.55).add(0.07));
-    } else {
-      water.colorNode = litWaterTone;
+      reflectedWater.emissiveNode = sheen.add(reflection.rgb.mul(fresnel.mul(0.38).add(0.025)));
     }
     // The sheet reaches past the old machined oval and dissolves where it runs thin, so the
     // shoreline is drawn by the ground contour rather than by the edge of a disc.
-    water.transparent = true;
-    water.opacityNode = smoothstep(0.003, 0.042, depth)
-      .mul(smoothstep(1.21, 1.02, shoreRamp))
-      .mul(fresnel.mul(0.2).add(0.8));
+    for (const material of [water, reflectedWater]) {
+      material.transparent = true;
+      material.depthWrite = false;
+      material.opacityNode = smoothstep(0.003, 0.032, depth)
+        .mul(smoothstep(1.21, 1.02, shoreRamp))
+        .mul(depthMix.mul(0.5).add(0.28).add(fresnel.mul(0.15)));
+    }
     const geo = new THREE.CircleGeometry(1, 96);
     geo.rotateX(-Math.PI / 2);
-    this.waterMesh = new THREE.Mesh(geo, water);
+    this.waterMesh = new THREE.Mesh(geo, this.profile.reflectionScale ? reflectedWater : water);
     this.waterMesh.scale.set(POOL_RADIUS_X * 1.22, 1, POOL_RADIUS_Z * 1.22);
     this.waterMesh.position.set(0, WATER_LEVEL, POOL_CENTER_Z);
     this.scene.add(this.waterMesh);
@@ -1585,14 +1691,14 @@ export class Forest {
             .div(vec2(POOL_RADIUS_X, POOL_RADIUS_Z))
             .length(),
         )
-          .mul(0.72)
-          .add(0.28),
+          .mul(0.96)
+          .add(0.04),
       )
       // Held to the clearing, and kept off the very front of the lens.
       .mul(smoothstep(11, 4.5, p.xz.length()))
       .mul(smoothstep(1.4, 3.2, distance(p, cameraPosition)))
       .mul(lit.mul(0.7).add(0.55))
-      .mul(3.4);
+      .mul(1.1);
     // Each slice is additive over a large part of the frame, so this is all fill rate:
     // five slices on a 26x26 quad more than halved the frame rate. Three discs cropped to
     // where the radial fade actually reaches cost a fraction of that for the same look.
@@ -1695,12 +1801,21 @@ export class Forest {
       new THREE.MeshBasicNodeMaterial({ color: '#b7c7ad', transparent: true, opacity: 0.32 }),
       count,
     );
-    for (let i = 0; i < count; i++)
-      this.dustData.push({
+    for (let i = 0; i < count; i++) {
+      const dust = {
         pos: new THREE.Vector3(range(-8, 8), range(0.4, 6), range(-9, 4)),
         seed: rand() * 20,
         size: range(0.003, 0.009),
-      });
+      };
+      this.dustData.push(dust);
+      // The first frame is rendered before animate(); identity matrices otherwise put
+      // eighty full-size white polyhedra in the centre of the clearing during startup.
+      this.dummy.position.copy(dust.pos);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.setScalar(dust.size);
+      this.dummy.updateMatrix();
+      this.stars.setMatrixAt(i, this.dummy.matrix);
+    }
     this.scene.add(this.stars);
   }
 
@@ -1959,6 +2074,7 @@ export class Forest {
       () => {
         this.visible = !document.hidden;
         this.lastFrame = 0;
+        this.frameBudget.reset();
       },
       options,
     );
@@ -1988,19 +2104,52 @@ export class Forest {
     this.container.style.cursor = this.hover ? 'pointer' : 'default';
   }
 
+  private isCompact(width = innerWidth, height = innerHeight) {
+    return (
+      width < 680 || (matchMedia('(pointer: coarse)').matches && Math.min(width, height) < 680)
+    );
+  }
+
+  private applyRenderProfile() {
+    this.profile = renderProfile(
+      this.container.clientWidth,
+      this.container.clientHeight,
+      devicePixelRatio,
+      this.mobile,
+      this.frameBudget.level,
+    );
+    if (Math.abs(this.renderer.getPixelRatio() - this.profile.pixelRatio) > 0.001)
+      this.renderer.setPixelRatio(this.profile.pixelRatio);
+    if (this.waterReflection && this.profile.reflectionScale)
+      this.waterReflection.reflector.resolutionScale = this.profile.reflectionScale;
+    if (this.waterMesh && this.simpleWater && this.reflectiveWater)
+      this.waterMesh.material = this.profile.reflectionScale
+        ? this.reflectiveWater
+        : this.simpleWater;
+    const output = this.profile.depthOfField ? this.cinematicOutput : this.leanOutput;
+    if (this.pipeline && output && this.pipeline.outputNode !== output) {
+      this.pipeline.outputNode = output;
+      this.pipeline.needsUpdate = true;
+    }
+  }
+
   private resize() {
     const width = this.container.clientWidth,
       height = this.container.clientHeight;
-    this.mobile = width < 680;
+    this.mobile = this.isCompact(width, height);
     this.camera.aspect = width / height;
     this.camera.fov = this.mobile ? 59 : 43;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+    this.applyRenderProfile();
+    this.frameBudget.reset();
+    this.lastFrame = 0;
   }
 
   private animate = (timestamp: number) => {
     if (!this.visible) return;
-    const dt = this.lastFrame ? Math.min((timestamp - this.lastFrame) / 1000, 0.05) : 1 / 60;
+    const frameSeconds = this.lastFrame ? (timestamp - this.lastFrame) / 1000 : 1 / 60;
+    const dt = Math.min(frameSeconds, 0.05);
     this.lastFrame = timestamp;
     this.elapsed += dt;
     this.time.value = this.elapsed;
@@ -2163,16 +2312,7 @@ export class Forest {
       this.events.onError(error);
     }
     this.frame++;
-    // One conservative reduction after warm-up, never an oscillating quality loop.
-    if (!this.adjustedQuality && this.frame > 180 && this.frame < 360)
-      this.slowFrames += dt > 0.029 ? 1 : 0;
-    if (!this.adjustedQuality && this.frame === 360) {
-      this.adjustedQuality = true;
-      if (this.slowFrames > 95) {
-        this.quality = 0.8;
-        this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1 : 1.25));
-      }
-    }
+    if (this.frameBudget.sample(frameSeconds)) this.applyRenderProfile();
   };
 
   private updateDrop(t: number) {
@@ -2439,7 +2579,8 @@ export class Forest {
       snailDiscovered: this.snailDiscovered,
       lightEnabled: this.lightEnabled,
       reducedMotion: this.reducedMotion.matches,
-      quality: this.quality,
+      quality: this.profile.tier === 0 ? 1 : this.profile.tier === 1 ? 0.8 : 0.6,
+      renderProfile: this.profile,
       zoom: this.currentZoom,
       orbit: [+this.orbitEased.yaw.toFixed(3), +this.orbitEased.pitch.toFixed(3)],
       viewIndex: this.viewIndex,
@@ -2473,6 +2614,9 @@ export class Forest {
     this.disposal.abort();
     this.renderer.setAnimationLoop(null);
     this.pipeline?.dispose();
+    this.waterReflection?.dispose();
+    this.simpleWater?.dispose();
+    this.reflectiveWater?.dispose();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.geometry.dispose();
