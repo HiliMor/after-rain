@@ -27,6 +27,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { loadNaturalSurfaces, makeDetailMaps } from './surfaces';
 import { FrameBudget, renderProfile } from './quality';
+import { GardenSnail } from './snail';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   makeTextures,
@@ -39,10 +40,6 @@ import {
   mossShoot,
   mossDensity,
   shadeByHeight,
-  snailHeadGeometry,
-  snailMantleGeometry,
-  snailShellGeometry,
-  snailFootGeometry,
   waterDropGeometry,
   fernGeometry,
   tube,
@@ -112,13 +109,11 @@ export class Forest {
   private waterMesh!: THREE.Mesh;
   private floatingLeaf!: THREE.Group;
   private snail = new THREE.Group();
-  private snailHead = new THREE.Group();
-  private tentacles: THREE.Group[] = [];
+  private snailActor!: GardenSnail;
   private snailHit!: THREE.Mesh;
   private snailRetraction = 0;
   private snailDiscovered = false;
   private snailFocusUntil = 0;
-  private snailReveal = 0;
   private firefly = new THREE.Group();
   private pointerLight = new THREE.PointLight(0xffdc8d, 3, 5.5, 2);
   private guideLight = new THREE.PointLight(0xffce72, 1.3, 4, 2);
@@ -438,7 +433,7 @@ export class Forest {
       );
       const patch = mossDensity(x, z);
       const h = range(0.025, 0.115) * (0.5 + patch * 1.15);
-      this.dummy.position.set(x, ground(x, z), z);
+      this.dummy.position.set(x, ground(x, z) - 0.045, z);
       this.dummy.rotation.set(range(-0.5, 0.5), rand() * 6.28, range(-0.4, 0.4));
       this.dummy.scale.set(h * range(0.5, 1.4), h, h);
       this.dummy.updateMatrix();
@@ -465,8 +460,11 @@ export class Forest {
           z = range(-3.5, 4.2);
         } while (!outsidePool(x, z, 1.1) || rand() > Math.pow(mossDensity(x, z), 2));
         const patch = mossDensity(x, z);
-        const s = range(0.19, 0.58) * (0.55 + patch * 0.65);
-        this.dummy.position.set(x, ground(x, z), z);
+        const s =
+          range(0.19, 0.58) *
+          (0.55 + patch * 0.65) *
+          (x > 2.2 && x < 3.7 && z > 1.1 && z < 2.05 ? 0.3 : 1);
+        this.dummy.position.set(x, ground(x, z) - 0.045, z);
         this.dummy.scale.set(s * range(0.7, 1.3), s * range(0.65, 1.4), s);
         this.dummy.rotation.set(range(-0.3, 0.3), rand() * 7, range(-0.4, 0.4));
         this.dummy.updateMatrix();
@@ -514,9 +512,9 @@ export class Forest {
       } while (!outsidePool(x, z, 1.05));
       // Beads gather where the moss is thickest, which is the same low-frequency pattern
       // the carpet itself is scattered by.
-      const thickness = 0.5 + 0.5 * Math.sin(x * 3.2) * Math.sin(z * 3.7);
+      const thickness = mossDensity(x, z);
       const s = range(0.0055, 0.0155) * (0.55 + thickness * 0.75);
-      this.dummy.position.set(x, ground(x, z) + range(0.012, 0.115), z);
+      this.dummy.position.set(x, ground(x, z) - 0.04 + range(0.015, 0.045) * thickness, z);
       this.dummy.scale.set(s, s * range(0.72, 0.95), s);
       this.dummy.rotation.set(0, 0, 0);
       this.dummy.updateMatrix();
@@ -775,7 +773,10 @@ export class Forest {
         ring = range(1.01, 1.11),
         x = Math.cos(angle) * 2.35 * ring,
         z = 1.1 + Math.sin(angle) * 1.55 * ring,
-        h = range(0.12, 0.36) * (0.82 + 0.18 * Math.sin(angle * 7));
+        h =
+          range(0.12, 0.36) *
+          (0.82 + 0.18 * Math.sin(angle * 7)) *
+          (x > 1.8 && z > 0.95 && z < 2.9 ? 0.14 : 1);
       this.dummy.position.set(x, ground(x, z) + 0.008, z);
       this.dummy.rotation.set(range(-0.22, 0.22), angle + range(-0.6, 0.6), range(-0.35, 0.35));
       this.dummy.scale.set(h * range(0.55, 1.15), h, h * range(0.65, 1.2));
@@ -802,7 +803,7 @@ export class Forest {
         x = Math.cos(a) * range(2.6, 3.2),
         z = 1.1 + Math.sin(a) * range(1.7, 2.1),
         y = ground(x, z),
-        h = range(0.15, 0.5);
+        h = range(0.15, 0.5) * (x > 1.8 && z > 0.95 && z < 2.9 ? 0.15 : 1);
       const tip = new THREE.Vector3(x + 0.09, y + h, z + 0.05);
       this.scene.add(
         tube(
@@ -814,6 +815,7 @@ export class Forest {
       );
       const bead = new THREE.Mesh(dewGeo, dew);
       bead.position.copy(tip);
+      if (x > 1.8 && z > 0.95 && z < 2.9) bead.scale.setScalar(0.35);
       this.scene.add(bead);
     }
   }
@@ -945,13 +947,14 @@ export class Forest {
       const x = range(-4, 4),
         z = range(-3, 3);
       if (!outsidePool(x, z, 1.08)) continue;
-      shard.position.set(x, ground(x, z), z);
+      shard.position.set(x, ground(x, z) - 0.04, z);
       shard.rotation.set(rand() * 0.7, rand() * 7, rand() * 0.4);
       this.scene.add(shard);
     }
   }
 
   private buildMushrooms() {
+    const contactPatches: THREE.BufferGeometry[] = [];
     const capMat = new THREE.MeshPhysicalNodeMaterial({
       map: this.detail.capColor,
       bumpMap: this.detail.capHeight,
@@ -990,15 +993,25 @@ export class Forest {
       [-1.93, -0.12, 0.43],
       [-2.7, 0.65, 0.33],
       [2.7, 1.3, 0.46],
-      [2.99, 1.47, 0.29],
+      [3.12, 1.17, 0.29],
       [-0.8, -2.2, 0.55],
       [-0.5, -2.4, 0.32],
     ];
     for (const [x, z, size] of sets) {
       const group = new THREE.Group();
-      group.position.set(x, ground(x, z), z);
+      group.position.set(x, ground(x, z) - 0.062, z);
       group.rotation.z = range(-0.14, 0.14);
       group.scale.setScalar(size);
+      const contact = new THREE.PlaneGeometry(size * 0.75, size * 0.65, 6, 6);
+      contact.rotateX(-Math.PI / 2);
+      const contactPositions = contact.attributes.position;
+      for (let v = 0; v < contactPositions.count; v++) {
+        const wx = x + contactPositions.getX(v),
+          wz = z + contactPositions.getZ(v);
+        contactPositions.setXYZ(v, wx, ground(wx, wz) - 0.052, wz);
+      }
+      contact.computeVertexNormals();
+      contactPatches.push(contact);
       // One shared profile made eight copies of a single mushroom at different scales.
       // Age each one instead: young caps stay domed and tucked, older ones broaden and
       // lift their margin, and each stem leans its own way under its own crown.
@@ -1098,6 +1111,18 @@ export class Forest {
       group.add(crown);
       this.scene.add(group);
     }
+    const contactMat = new THREE.MeshBasicNodeMaterial({
+      color: '#11180c',
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    contactMat.opacityNode = exp(uv().sub(0.5).mul(2).pow(2).dot(vec2(1, 1)).mul(-4)).mul(0.35);
+    this.scene.add(new THREE.Mesh(mergeGeometries(contactPatches), contactMat));
+    contactPatches.forEach((geometry) => geometry.dispose());
   }
 
   private buildHero() {
@@ -1515,136 +1540,9 @@ export class Forest {
   }
 
   private buildSnail() {
-    this.snail.position.set(2.78, ground(2.78, 1.5) + 0.018, 1.5);
-    this.snail.rotation.y = -0.4;
-    this.snail.scale.setScalar(0.68);
-    const footMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#74836c',
-      map: this.detail.skinColor,
-      roughness: 0.98,
-      roughnessMap: this.detail.skinRoughness,
-      bumpMap: this.detail.skinHeight,
-      bumpScale: 0.024,
-      specularIntensity: 0.14,
-      clearcoat: 0,
-      side: THREE.DoubleSide,
-    });
-    const bodyMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#9b916d',
-      map: this.detail.skinColor,
-      roughness: 0.96,
-      roughnessMap: this.detail.skinRoughness,
-      bumpMap: this.detail.skinHeight,
-      bumpScale: 0.02,
-      specularIntensity: 0.16,
-      clearcoat: 0.18,
-      clearcoatRoughness: 0.48,
-      clearcoatRoughnessMap: this.detail.skinRoughness,
-      side: THREE.DoubleSide,
-    });
-    const headMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#a69c76',
-      map: this.detail.skinColor,
-      roughness: 0.99,
-      roughnessMap: this.detail.skinRoughness,
-      bumpMap: this.detail.skinHeight,
-      bumpScale: 0.022,
-      specularIntensity: 0.12,
-      clearcoat: 0.16,
-      clearcoatRoughness: 0.5,
-      clearcoatRoughnessMap: this.detail.skinRoughness,
-      side: THREE.DoubleSide,
-    });
-    const mucusMat = new THREE.MeshStandardNodeMaterial({
-      color: '#536451',
-      roughness: 1,
-      transparent: true,
-      opacity: 0.13,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const mucusTrail = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.14, 18, 2), mucusMat);
-    mucusTrail.rotation.x = -Math.PI / 2;
-    mucusTrail.position.set(0.14, 0.018, 0.012);
-    this.snail.add(mucusTrail);
-    this.snail.add(new THREE.Mesh(snailFootGeometry(), footMat));
-    const shellMat = new THREE.MeshPhysicalNodeMaterial({
-      map: this.detail.shellColor,
-      bumpMap: this.detail.shellHeight,
-      bumpScale: 0.018,
-      roughnessMap: this.detail.shellRoughness,
-      color: '#a66f3f',
-      roughness: 0.98,
-      specularIntensity: 0.16,
-      // A damp shell, not a glazed one. Set high and tight this threw hard white streaks
-      // and read as lacquered ceramic - a shell in a dark wood carries a soft sheen along
-      // its whorl, nothing more, so the film is weak and its highlight deliberately broad.
-      clearcoat: 0.2,
-      clearcoatRoughness: 0.46,
-      clearcoatRoughnessMap: this.detail.shellRoughness,
-      side: THREE.DoubleSide,
-    });
-    const shell = new THREE.Mesh(snailShellGeometry(), shellMat);
-    shell.position.set(0.06, 0.3, -0.035);
-    shell.scale.set(1.08, 1, 0.9);
-    shell.rotation.z = -0.045;
-    this.snail.add(shell);
-    this.snail.add(new THREE.Mesh(snailMantleGeometry(), bodyMat));
-    this.snailHead.position.set(-0.47, 0.06, 0);
-    this.snail.add(this.snailHead);
-    this.snailHead.add(new THREE.Mesh(snailHeadGeometry(), headMat));
-    const mouthMat = new THREE.MeshStandardNodeMaterial({ color: '#49372a', roughness: 1 });
-    this.snailHead.add(
-      tube(
-        [new THREE.Vector3(-0.21, 0.045, 0.105), new THREE.Vector3(-0.255, 0.037, 0.11)],
-        0.008,
-        mouthMat,
-        8,
-      ),
-    );
-    const eyeMat = new THREE.MeshPhysicalNodeMaterial({
-      color: '#121b16',
-      roughness: 0.35,
-      clearcoat: 0.35,
-    });
-    for (const side of [-1, 1]) {
-      const tentacle = new THREE.Group();
-      tentacle.position.set(-0.09, 0.09, side * 0.07);
-      tentacle.add(
-        tube(
-          [
-            new THREE.Vector3(),
-            new THREE.Vector3(-0.07, 0.12, side * 0.015),
-            new THREE.Vector3(-0.15, 0.24, side * 0.035),
-          ],
-          0.015,
-          bodyMat,
-          10,
-        ),
-      );
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), eyeMat);
-      eye.position.set(-0.15, 0.24, side * 0.035);
-      tentacle.add(eye);
-      this.snailHead.add(tentacle);
-      this.tentacles.push(tentacle);
-      this.snailHead.add(
-        tube(
-          [
-            new THREE.Vector3(-0.1, -0.02, side * 0.06),
-            new THREE.Vector3(-0.21, 0.02, side * 0.12),
-          ],
-          0.013,
-          bodyMat,
-          6,
-        ),
-      );
-    }
-    this.snailHit = new THREE.Mesh(
-      new THREE.SphereGeometry(0.67, 8, 6),
-      new THREE.MeshBasicNodeMaterial({ visible: false }),
-    );
-    this.snailHit.position.y = 0.28;
-    this.snail.add(this.snailHit);
+    this.snailActor = new GardenSnail(this.detail);
+    this.snail = this.snailActor.root;
+    this.snailHit = this.snailActor.hit;
     this.scene.add(this.snail);
   }
 
@@ -1830,8 +1728,8 @@ export class Forest {
     return true;
   }
   focusSnail() {
-    this.snailFocusUntil = this.elapsed + 12;
-    this.snailReveal = 1;
+    this.snailFocusUntil = this.elapsed + 18;
+    if (this.lightEnabled) this.targetLight.set(2.0, 0.75, 2.15);
     this.zoom = 0.6;
     this.discoverSnail();
   }
@@ -2214,10 +2112,10 @@ export class Forest {
       if (this.mobile) {
         // A narrow portrait frame cropped the head and tentacles, so it stands back.
         cam.set(1.78, 1.13, 4.06);
-        target.set(2.68, 0.19, 1.5);
+        target.copy(this.snail.position).add(new THREE.Vector3(-0.08, 0.23, 0.02));
       } else {
         cam.set(2.05, 0.86, 3.32);
-        target.set(2.78, 0.17, 1.5);
+        target.copy(this.snail.position).add(new THREE.Vector3(-0.08, 0.23, 0.02));
       }
     }
     // Apply the visitor's swing by rotating the framing around what it is looking at, so
@@ -2275,11 +2173,11 @@ export class Forest {
     });
     if (
       this.keyShadow &&
-      (this.frame % 60 === 0 || (t - this.dropStarted < 2 && this.frame % 4 === 0))
+      (this.frame % (focus ? 12 : 60) === 0 || (t - this.dropStarted < 2 && this.frame % 4 === 0))
     )
       this.keyShadow.needsUpdate = true;
     this.updateDrop(t);
-    this.updateSnail(t, ease);
+    this.updateSnail(dt);
     for (let i = 0; i < this.dustData.length; i++) {
       const d = this.dustData[i];
       this.dummy.position.copy(d.pos);
@@ -2535,27 +2433,20 @@ export class Forest {
     this.floatingLeaf.position.y = 0.013 + reaction * 0.025;
   }
 
-  private updateSnail(t: number, ease: number) {
-    const near =
-      this.snailHovered ||
-      (this.lightEnabled && this.targetLight.distanceTo(this.snail.position) < 0.8);
-    this.snailRetraction = THREE.MathUtils.lerp(
-      this.snailRetraction,
-      near ? 1 : 0,
-      ease * (near ? 0.8 : 0.16),
-    );
-    if (near) this.discoverSnail();
-    this.snailReveal = Math.min(1, this.snailReveal + 0.0006 * this.motion.value);
-    this.snail.position.x = 2.78 - this.snailReveal * 0.1 + this.snailRetraction * 0.06;
-    this.snail.position.z = 1.5 + Math.sin(t * 0.34) * 0.012 * this.motion.value;
-    this.snail.position.y = ground(this.snail.position.x, this.snail.position.z) + 0.018;
-    this.snailHead.scale.x = 1 - this.snailRetraction * 0.5;
-    this.snailHead.position.x = -0.47 + this.snailRetraction * 0.1;
-    this.tentacles.forEach((tentacle, i) => {
-      tentacle.scale.y = 1 - this.snailRetraction * 0.55;
-      tentacle.rotation.z = Math.sin(t * 0.8 + i) * 0.13 * this.motion.value;
-      tentacle.rotation.x = Math.sin(t * 0.5 + i * 2) * 0.19 * this.motion.value;
-    });
+  private updateSnail(dt: number) {
+    const proximity = this.snailHovered
+      ? 1
+      : this.lightEnabled
+        ? 1 -
+          THREE.MathUtils.smoothstep(
+            this.pointerLight.position.distanceTo(this.snail.position),
+            0.42,
+            1.15,
+          )
+        : 0;
+    this.snailActor.update(dt, proximity, this.motion.value > 0);
+    this.snailRetraction = this.snailActor.motion.retraction;
+    if (proximity > 0.5) this.discoverSnail();
   }
 
   diagnostics() {
@@ -2576,6 +2467,7 @@ export class Forest {
       dropFallPosition: this.fallingDrop.position.toArray().map((v) => +v.toFixed(3)),
       rippleAge: this.elapsed - this.rippleTime.value,
       snailRetraction: this.snailRetraction,
+      snailMotion: { ...this.snailActor.motion },
       snailDiscovered: this.snailDiscovered,
       lightEnabled: this.lightEnabled,
       reducedMotion: this.reducedMotion.matches,

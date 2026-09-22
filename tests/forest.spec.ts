@@ -54,6 +54,7 @@ test('desktop: light, drop, leaf hit, snail, sound, notes and zoom work without 
   const snail = await point(page, 'snailScreen');
   await page.mouse.move(snail.x, snail.y);
   await expect.poll(async () => (await state(page)).snailRetraction).toBeGreaterThan(0.5);
+  expect((await state(page)).snailMotion.antennaRetraction).toBeGreaterThan(0.7);
   await page.mouse.move(100, 650);
   await expect
     .poll(async () => (await state(page)).snailRetraction, { timeout: 16000 })
@@ -72,6 +73,22 @@ test('desktop: light, drop, leaf hit, snail, sound, notes and zoom work without 
   await expect.poll(async () => (await state(page)).zoom).toBeGreaterThan(0.4);
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await state(page)).zoom).toBeLessThan(0.05);
+  expect(errors).toEqual([]);
+});
+
+test('snail close-up preserves crawl position and remains framed on a phone', async ({ page }) => {
+  const errors = captureErrors(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await ready(page);
+  const before = (await state(page)).snailMotion.travel;
+  await page.getByRole('button', { name: 'A quiet neighbour' }).click();
+  await page.waitForTimeout(2200);
+  const after = await state(page);
+  expect(after.snailMotion.travel).toBeGreaterThanOrEqual(before);
+  expect(after.snailMotion.travel - before).toBeLessThan(0.02);
+  expect(Math.abs(after.snailScreen[0])).toBeLessThan(0.65);
+  expect(Math.abs(after.snailScreen[1])).toBeLessThan(0.65);
+  await page.screenshot({ path: 'work/snail-mobile-final.png' });
   expect(errors).toEqual([]);
 });
 

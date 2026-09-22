@@ -124,8 +124,8 @@ export function makeDetailMaps() {
       put('capHeight', i, 108 + radialFiber * 19 + medium * 16 + fine * 12 + grain * 3);
       put('capRoughness', i, 161 + broad * 54 + fine * 20);
       // A cellular skin relief, with valleys separating many small irregular cells.
-      const sx = u * 52,
-        sy = v * 34,
+      const sx = u * 86,
+        sy = v * 58,
         cx = Math.floor(sx),
         cy = Math.floor(sy);
       let nearest = 10,
@@ -141,27 +141,31 @@ export function makeDetailMaps() {
           } else if (d < second) second = d;
         }
       const cell = Math.min(1, Math.max(0, (Math.sqrt(second) - Math.sqrt(nearest)) * 5));
-      put('skinHeight', i, 65 + cell * 90 + fine * 8);
+      put('skinHeight', i, 92 + cell * 49 + fine * 13);
       put(
         'skinColor',
         i,
-        70 + cell * 38 + broad * 35 + fine * 8,
-        68 + cell * 35 + broad * 28 + fine * 7,
-        48 + cell * 27 + broad * 25 + fine * 6,
+        91 + cell * 23 + broad * 30 + fine * 10,
+        86 + cell * 21 + broad * 27 + fine * 8,
+        64 + cell * 16 + broad * 24 + fine * 7,
       );
-      put('skinRoughness', i, 115 + (1 - cell) * 75 + broad * 25);
+      put('skinRoughness', i, 117 + (1 - cell) * 46 + broad * 58);
       const growth = Math.pow(0.5 + 0.5 * Math.sin(u * 1200 + medium * 3), 5);
-      const band = Math.pow(0.5 + 0.5 * Math.sin(v * Math.PI * 8 + broad * 0.7), 7);
-      const shellShade = 0.8 + patch * 0.3 - band * 0.42 - growth * 0.09;
+      const band = Math.pow(
+        0.5 + 0.5 * Math.sin(v * Math.PI * 8 + broad * 0.55 + Math.sin(u * 17) * 0.18),
+        6,
+      );
+      const weathering = Math.max(0, broad - 0.48) * 0.6;
+      const shellShade = 0.92 + patch * 0.22 - band * 0.35 - growth * 0.075;
       put(
         'shellColor',
         i,
-        141 * shellShade + medium * 12,
-        106 * shellShade + medium * 9,
-        67 * shellShade + medium * 7,
+        161 * shellShade + medium * 12 + weathering * 36,
+        123 * shellShade + medium * 9 + weathering * 48,
+        79 * shellShade + medium * 7 + weathering * 46,
       );
-      put('shellHeight', i, 106 + growth * 19 + fine * 15 + medium * 6);
-      put('shellRoughness', i, 156 + broad * 45 + growth * 22);
+      put('shellHeight', i, 103 + growth * 27 + fine * 10 + medium * 8);
+      put('shellRoughness', i, 143 + broad * 61 + growth * 24 + weathering * 30);
       put('grainHeight', i, 98 + medium * 22 + fine * 34 + grain * 9);
     }
   return Object.fromEntries(
