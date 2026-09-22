@@ -2,7 +2,11 @@
 
 A small, interactive forest after the rain. A standalone Three.js scene with a wet canopy leaf, a refracting droplet, a shallow pool, procedural moss and ferns, a warm firefly, and a shy snail.
 
-**Live:** https://hilimor.github.io/after-rain/ — deployed from `main` by GitHub Actions.
+**[Explore the live scene ↗](https://hilimor.github.io/after-rain/)** — deployed from `main` by GitHub Actions.
+
+[![After Rain: a wet canopy leaf above a moonlit forest pool, with animated light and ripples](public/demo/after-rain-demo.gif)](https://hilimor.github.io/after-rain/)
+
+An 8-second preview from the running scene. [Watch the full 19-second demo (MP4) ↗](https://hilimor.github.io/after-rain/demo/after-rain-demo.mp4) · [View the still image](public/demo/after-rain-cover.jpg).
 
 **Canonical code root:** `/Users/hilimor/Documents/after-rain`, mirrored to `HiliMor/after-rain`. Independent of Skógafoss: it neither depends on nor changes that project.
 
